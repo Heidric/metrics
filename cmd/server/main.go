@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	addr := "localhost:8090"
+	addr := "localhost:8080"
 
 	storage := db.GetInstance()
 	service := services.NewMetricsService(storage)
