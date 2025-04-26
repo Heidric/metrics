@@ -21,7 +21,11 @@ func NewMetricsService(storage MetricsStorage) *MetricsService {
 }
 
 func (ms *MetricsService) UpdateGauge(name, value string) error {
-	ms.storage.Set(name, fmt.Sprint(value))
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return errors.ErrInvalidValue
+	}
+	ms.storage.Set(name, fmt.Sprint(intValue))
 
 	return nil
 }
@@ -31,15 +35,19 @@ func (ms *MetricsService) UpdateCounter(name, value string) error {
 	if err != nil {
 		return errors.ErrInvalidValue
 	}
+
+	counter := 0
 	strCounter, err := ms.storage.Get(name)
 	if err != nil {
 		if err != errors.ErrKeyNotFound {
 			return err
 		}
 	}
-	counter, err := strconv.Atoi(strCounter)
-	if err != nil {
-		return err
+	if strCounter != "" {
+		counter, err = strconv.Atoi(strCounter)
+		if err != nil {
+			return err
+		}
 	}
 
 	ms.storage.Set(name, fmt.Sprint(counter+intValue))

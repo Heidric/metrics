@@ -24,12 +24,10 @@ func (h *MetricsHandlers) UpdateMetricHandler(w http.ResponseWriter, r *http.Req
 
 	path := r.URL.Path
 	parts := strings.Split(path, "/")
-	if len(parts) != 5 {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
+	var metric, name, value string
+	if len(parts) == 5 {
+		metric, name, value = parts[2], parts[3], parts[4]
 	}
-	metric, name, value := parts[2], parts[3], parts[4]
-
 	if strings.TrimSpace(name) == "" {
 		errors.NotFoundError(w)
 		return
@@ -51,7 +49,6 @@ func (h *MetricsHandlers) UpdateMetricHandler(w http.ResponseWriter, r *http.Req
 			errors.ValidationError(w, err.Error())
 			return
 		}
-
 		errors.InternalError(w)
 		return
 	}
