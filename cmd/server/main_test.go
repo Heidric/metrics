@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,16 +27,16 @@ func TestServer(t *testing.T) {
 	defer server.Close()
 
 	t.Run("Successful gauge update", func(t *testing.T) {
-		resp, err := http.Post(server.URL+"/update/gauge/temp/42", "", nil)
+		req, err := http.NewRequest("POST", server.URL+"/update/gauge/temp/42", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				return
-			}
-		}(resp.Body)
+
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
@@ -52,16 +51,16 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("Successful counter update", func(t *testing.T) {
-		resp, err := http.Post(server.URL+"/update/counter/hits/10", "", nil)
+		req, err := http.NewRequest("POST", server.URL+"/update/counter/hits/10", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				return
-			}
-		}(resp.Body)
+
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
@@ -74,16 +73,16 @@ func TestServer(t *testing.T) {
 			t.Fatalf("Expected '10', got '%s'", value)
 		}
 
-		resp, err = http.Post(server.URL+"/update/counter/hits/5", "", nil)
+		req, err = http.NewRequest("POST", server.URL+"/update/counter/hits/5", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				return
-			}
-		}(resp.Body)
+
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
@@ -98,32 +97,32 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("Invalid path", func(t *testing.T) {
-		resp, err := http.Post(server.URL+"/update/invalid/temp/42", "", nil)
+		req, err := http.NewRequest("POST", server.URL+"/update/invalid/temp/42", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				return
-			}
-		}(resp.Body)
+
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("Expected status 400, got %d", resp.StatusCode)
 		}
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		resp, err := http.Get(server.URL + "/nonexistent")
+		req, err := http.NewRequest("GET", server.URL+"/nonexistent", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				return
-			}
-		}(resp.Body)
+
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("Expected status 404, got %d", resp.StatusCode)
 		}
