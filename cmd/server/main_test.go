@@ -36,6 +36,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -60,6 +61,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -82,6 +84,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -106,6 +109,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("Expected status 400, got %d", resp.StatusCode)
@@ -122,6 +126,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("Expected status 404, got %d", resp.StatusCode)
