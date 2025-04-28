@@ -7,13 +7,13 @@ import (
 )
 
 var (
-	instance *KeyValueStore
+	instance *Store
 	once     sync.Once
 )
 
-func GetInstance() *KeyValueStore {
+func GetInstance() *Store {
 	once.Do(func() {
-		instance = NewKeyValueStore()
+		instance = NewStore()
 	})
 	return instance
 }
@@ -34,21 +34,21 @@ type command struct {
 	respond chan<- interface{}
 }
 
-type KeyValueStore struct {
+type Store struct {
 	commands chan command
 }
 
-func NewKeyValueStore() *KeyValueStore {
-	kvs := &KeyValueStore{
+func NewStore() *Store {
+	s := &Store{
 		commands: make(chan command),
 	}
-	go kvs.run()
-	return kvs
+	go s.run()
+	return s
 }
 
-func (kvs *KeyValueStore) run() {
+func (s *Store) run() {
 	data := make(map[string]string)
-	for cmd := range kvs.commands {
+	for cmd := range s.commands {
 		switch cmd.action {
 		case Set:
 			data[cmd.key] = cmd.value
@@ -72,9 +72,9 @@ func (kvs *KeyValueStore) run() {
 	}
 }
 
-func (kvs *KeyValueStore) Set(key, value string) {
+func (s *Store) Set(key, value string) {
 	response := make(chan interface{})
-	kvs.commands <- command{
+	s.commands <- command{
 		action:  Set,
 		key:     key,
 		value:   value,
@@ -83,9 +83,9 @@ func (kvs *KeyValueStore) Set(key, value string) {
 	<-response
 }
 
-func (kvs *KeyValueStore) Get(key string) (string, error) {
+func (s *Store) Get(key string) (string, error) {
 	response := make(chan interface{})
-	kvs.commands <- command{
+	s.commands <- command{
 		action:  Get,
 		key:     key,
 		respond: response,
@@ -101,9 +101,9 @@ func (kvs *KeyValueStore) Get(key string) (string, error) {
 	}
 }
 
-func (kvs *KeyValueStore) Delete(key string) {
+func (s *Store) Delete(key string) {
 	response := make(chan interface{})
-	kvs.commands <- command{
+	s.commands <- command{
 		action:  Delete,
 		key:     key,
 		respond: response,
@@ -111,15 +111,15 @@ func (kvs *KeyValueStore) Delete(key string) {
 	<-response
 }
 
-func (kvs *KeyValueStore) GetAll() map[string]string {
+func (s *Store) GetAll() map[string]string {
 	response := make(chan interface{})
-	kvs.commands <- command{
+	s.commands <- command{
 		action:  GetAll,
 		respond: response,
 	}
 	return (<-response).(map[string]string)
 }
 
-func (kvs *KeyValueStore) Close() {
-	close(kvs.commands)
+func (s *Store) Close() {
+	close(s.commands)
 }

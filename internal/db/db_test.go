@@ -8,9 +8,9 @@ import (
 	"github.com/Heidric/metrics.git/internal/errors"
 )
 
-func TestKeyValueStore(t *testing.T) {
+func TestStore(t *testing.T) {
 	t.Run("Set and Get", func(t *testing.T) {
-		store := NewKeyValueStore()
+		store := NewStore()
 		defer store.Close()
 
 		store.Set("key1", "value1")
@@ -25,7 +25,7 @@ func TestKeyValueStore(t *testing.T) {
 	})
 
 	t.Run("Get non-existent key", func(t *testing.T) {
-		store := NewKeyValueStore()
+		store := NewStore()
 		defer store.Close()
 
 		_, err := store.Get("nonexistent")
@@ -35,7 +35,7 @@ func TestKeyValueStore(t *testing.T) {
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		store := NewKeyValueStore()
+		store := NewStore()
 		defer store.Close()
 
 		store.Set("key1", "value1")
@@ -48,7 +48,7 @@ func TestKeyValueStore(t *testing.T) {
 	})
 
 	t.Run("GetAll", func(t *testing.T) {
-		store := NewKeyValueStore()
+		store := NewStore()
 		defer store.Close()
 
 		store.Set("key1", "value1")
@@ -64,7 +64,7 @@ func TestKeyValueStore(t *testing.T) {
 	})
 
 	t.Run("Concurrent access", func(t *testing.T) {
-		store := NewKeyValueStore()
+		store := NewStore()
 		defer store.Close()
 
 		go func() {

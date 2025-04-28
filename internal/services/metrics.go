@@ -10,6 +10,7 @@ import (
 type MetricsStorage interface {
 	Set(key, value string)
 	Get(key string) (string, error)
+	GetAll() map[string]string
 }
 
 type MetricsService struct {
@@ -21,12 +22,11 @@ func NewMetricsService(storage MetricsStorage) *MetricsService {
 }
 
 func (ms *MetricsService) UpdateGauge(name, value string) error {
-	intValue, err := strconv.Atoi(value)
+	_, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return errors.ErrInvalidValue
 	}
-	ms.storage.Set(name, fmt.Sprint(intValue))
-
+	ms.storage.Set(name, value)
 	return nil
 }
 
@@ -36,21 +36,22 @@ func (ms *MetricsService) UpdateCounter(name, value string) error {
 		return errors.ErrInvalidValue
 	}
 
-	counter := 0
-	strCounter, err := ms.storage.Get(name)
-	if err != nil {
-		if err != errors.ErrKeyNotFound {
-			return err
-		}
-	}
-	if strCounter != "" {
-		counter, err = strconv.Atoi(strCounter)
+	current := 0
+	if strValue, err := ms.storage.Get(name); err == nil {
+		current, err = strconv.Atoi(strValue)
 		if err != nil {
 			return err
 		}
 	}
 
-	ms.storage.Set(name, fmt.Sprint(counter+intValue))
-
+	ms.storage.Set(name, fmt.Sprintf("%d", current+intValue))
 	return nil
+}
+
+func (ms *MetricsService) GetMetric(metricType, metricName string) (string, error) {
+	return ms.storage.Get(metricName)
+}
+
+func (ms *MetricsService) ListMetrics() map[string]string {
+	return ms.storage.GetAll()
 }

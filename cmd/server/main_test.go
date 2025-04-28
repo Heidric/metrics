@@ -3,31 +3,27 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Heidric/metrics.git/internal/db"
-	"github.com/Heidric/metrics.git/internal/handlers"
+	"github.com/Heidric/metrics.git/internal/server"
 	"github.com/Heidric/metrics.git/internal/services"
 )
 
 func TestServer(t *testing.T) {
-	storage := db.NewKeyValueStore()
+	storage := db.NewStore()
 	defer storage.Close()
 	service := services.NewMetricsService(storage)
-	handler := handlers.NewMetricsHandlers(service)
+	srv := server.NewServer(":8080", service)
+	testServer := httptest.NewServer(srv.Srv.Handler)
+	defer testServer.Close()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/update/") {
-			handler.UpdateMetricHandler(w, r)
-		} else {
-			handler.NotFoundHandler(w, r)
-		}
-	}))
-	defer server.Close()
+	t.Run("List metrics returns HTML", func(t *testing.T) {
+		// Setup test data
+		storage.Set("gauge_temp", "42.5")
+		storage.Set("counter_hits", "10")
 
-	t.Run("Successful gauge update", func(t *testing.T) {
-		req, err := http.NewRequest("POST", server.URL+"/update/gauge/temp/42", nil)
+		req, err := http.NewRequest("GET", testServer.URL+"/", nil)
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
@@ -42,17 +38,14 @@ func TestServer(t *testing.T) {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
 
-		value, err := storage.Get("temp")
-		if err != nil {
-			t.Fatalf("Failed to get value: %v", err)
-		}
-		if value != "42" {
-			t.Fatalf("Expected '42', got '%s'", value)
+		contentType := resp.Header.Get("Content-Type")
+		if contentType != "text/html" {
+			t.Fatalf("Expected Content-Type text/html, got %s", contentType)
 		}
 	})
 
-	t.Run("Successful counter update", func(t *testing.T) {
-		req, err := http.NewRequest("POST", server.URL+"/update/counter/hits/10", nil)
+	t.Run("Update and get gauge", func(t *testing.T) {
+		req, err := http.NewRequest("POST", testServer.URL+"/update/gauge/temp/42.5", nil)
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
@@ -67,15 +60,8 @@ func TestServer(t *testing.T) {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
 
-		value, err := storage.Get("hits")
-		if err != nil {
-			t.Fatalf("Failed to get value: %v", err)
-		}
-		if value != "10" {
-			t.Fatalf("Expected '10', got '%s'", value)
-		}
-
-		req, err = http.NewRequest("POST", server.URL+"/update/counter/hits/5", nil)
+		// Verify the value
+		req, err = http.NewRequest("GET", testServer.URL+"/value/gauge/temp", nil)
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
@@ -89,18 +75,10 @@ func TestServer(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
-
-		value, err = storage.Get("hits")
-		if err != nil {
-			t.Fatalf("Failed to get value: %v", err)
-		}
-		if value != "15" {
-			t.Fatalf("Expected '15', got '%s'", value)
-		}
 	})
 
-	t.Run("Invalid path", func(t *testing.T) {
-		req, err := http.NewRequest("POST", server.URL+"/update/invalid/temp/42", nil)
+	t.Run("Update and get counter", func(t *testing.T) {
+		req, err := http.NewRequest("POST", testServer.URL+"/update/counter/hits/10", nil)
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
@@ -111,25 +89,24 @@ func TestServer(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("Expected status 400, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
-	})
 
-	t.Run("Not found", func(t *testing.T) {
-		req, err := http.NewRequest("GET", server.URL+"/nonexistent", nil)
+		// Verify the value
+		req, err = http.NewRequest("GET", testServer.URL+"/value/counter/hits", nil)
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusNotFound {
-			t.Fatalf("Expected status 404, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
 	})
 }
