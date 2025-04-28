@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -16,7 +17,7 @@ import (
 )
 
 func main() {
-	addr := "localhost:8080"
+	addr := getServerAddress()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -35,7 +36,6 @@ func main() {
 	ctx = logger.Zerolog().WithContext(ctx)
 
 	storage := db.GetInstance()
-
 	metrics := services.NewMetricsService(storage)
 
 	server := server.NewServer(addr, metrics)
@@ -43,10 +43,22 @@ func main() {
 
 	runner.Go(func() error {
 		<-ctx.Done()
-
 		db.GetInstance().Close()
 		return server.Shutdown(ctx)
 	})
 
 	runner.Wait()
+}
+
+func getServerAddress() string {
+	addr := flag.String("a", "localhost:8080", "HTTP server endpoint address")
+	flag.Parse()
+
+	if flag.NArg() > 0 {
+		log.Printf("Error: unknown flags or arguments: %v\n", flag.Args())
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	return *addr
 }

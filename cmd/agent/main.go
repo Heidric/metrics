@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -30,9 +31,25 @@ type Agent struct {
 	stopChan       chan struct{}
 }
 
+func parseFlags() (string, time.Duration, time.Duration) {
+	serverAddr := flag.String("a", "localhost:8080", "HTTP server endpoint address")
+	pollInterval := flag.Int("p", 2, "Poll interval in seconds")
+	reportInterval := flag.Int("r", 10, "Report interval in seconds")
+
+	flag.Parse()
+
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "Error: unknown flags or arguments: %v\n", flag.Args())
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second
+}
+
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
 	return &Agent{
-		serverURL:      serverURL,
+		serverURL:      "http://" + serverURL,
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		client:         &http.Client{Timeout: 5 * time.Second},
@@ -47,6 +64,18 @@ func (a *Agent) Run() {
 
 func (a *Agent) Stop() {
 	close(a.stopChan)
+}
+
+func (a *Agent) GetMetrics() []Metric {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.metrics
+}
+
+func (a *Agent) GetPollCount() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.pollCount
 }
 
 func (a *Agent) pollMetrics() {
@@ -126,10 +155,7 @@ func (a *Agent) reportMetrics() {
 				if err != nil {
 					continue
 				}
-				err = resp.Body.Close()
-				if err != nil {
-					continue
-				}
+				resp.Body.Close()
 			}
 		case <-a.stopChan:
 			return
@@ -137,20 +163,10 @@ func (a *Agent) reportMetrics() {
 	}
 }
 
-func (a *Agent) GetMetrics() []Metric {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.metrics
-}
-
-func (a *Agent) GetPollCount() int64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.pollCount
-}
-
 func main() {
-	agent := NewAgent("http://localhost:8080", 2*time.Second, 10*time.Second)
+	serverAddr, pollInterval, reportInterval := parseFlags()
+
+	agent := NewAgent(serverAddr, pollInterval, reportInterval)
 	agent.Run()
 
 	stop := make(chan os.Signal, 1)
