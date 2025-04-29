@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadConfig(t *testing.T) {
+func TestParseFlags(t *testing.T) {
 	tests := []struct {
 		name        string
 		setup       func()
@@ -68,11 +68,10 @@ func TestLoadConfig(t *testing.T) {
 			}()
 
 			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-			config, err := loadConfig()
-			require.NoError(t, err)
-			require.Equal(t, tt.wantAddress, config.ServerAddress)
-			require.Equal(t, tt.wantPoll, config.PollInterval)
-			require.Equal(t, tt.wantReport, config.ReportInterval)
+			address, poll, report := parseFlags()
+			require.Equal(t, tt.wantAddress, address)
+			require.Equal(t, tt.wantPoll, poll)
+			require.Equal(t, tt.wantReport, report)
 		})
 	}
 }

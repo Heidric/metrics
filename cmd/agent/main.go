@@ -1,56 +1,179 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"math/rand"
+	"net/http"
 	"os"
+	"os/signal"
+	"runtime"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/cfg"
 )
 
-type Config struct {
-	cfg.Config
-	flagAddress string
-	flagPoll    int
-	flagReport  int
+type Metric struct {
+	Name  string
+	Type  string
+	Value string
 }
 
-func loadConfig() (*Config, error) {
-	baseCfg, err := cfg.NewConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	config := &Config{Config: *baseCfg}
-
-	flag.StringVar(&config.flagAddress, "a", "", "HTTP server endpoint address")
-	flag.IntVar(&config.flagPoll, "p", 0, "Poll interval in seconds")
-	flag.IntVar(&config.flagReport, "r", 0, "Report interval in seconds")
-	flag.Parse()
-
-	if config.flagAddress != "" {
-		config.ServerAddress = config.flagAddress
-	}
-	if config.flagPoll > 0 {
-		config.PollInterval = time.Duration(config.flagPoll) * time.Second
-	}
-	if config.flagReport > 0 {
-		config.ReportInterval = time.Duration(config.flagReport) * time.Second
-	}
-
-	return config, nil
+type Agent struct {
+	serverURL      string
+	pollInterval   time.Duration
+	reportInterval time.Duration
+	metrics        []Metric
+	pollCount      int64
+	client         *http.Client
+	mu             sync.Mutex
+	stopChan       chan struct{}
 }
 
-func main() {
-	config, err := loadConfig()
+func parseFlags() (string, time.Duration, time.Duration) {
+	config, err := cfg.NewConfig()
 	if err != nil {
-		fmt.Printf("Failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Starting agent with configuration:\n")
-	fmt.Printf("  Server Address: %s\n", config.ServerAddress)
-	fmt.Printf("  Poll Interval: %v\n", config.PollInterval)
-	fmt.Printf("  Report Interval: %v\n", config.ReportInterval)
+	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")
+	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
+	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
+
+	flag.Parse()
+
+	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second
+}
+
+func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
+	return &Agent{
+		serverURL:      "http://" + serverURL,
+		pollInterval:   pollInterval,
+		reportInterval: reportInterval,
+		client:         &http.Client{Timeout: 5 * time.Second},
+		stopChan:       make(chan struct{}),
+	}
+}
+
+func (a *Agent) Run() {
+	go a.pollMetrics()
+	go a.reportMetrics()
+}
+
+func (a *Agent) Stop() {
+	close(a.stopChan)
+}
+
+func (a *Agent) GetMetrics() []Metric {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.metrics
+}
+
+func (a *Agent) GetPollCount() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.pollCount
+}
+
+func (a *Agent) pollMetrics() {
+	ticker := time.NewTicker(a.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+
+			a.mu.Lock()
+			a.metrics = []Metric{
+				{"Alloc", "gauge", fmt.Sprintf("%f", float64(memStats.Alloc))},
+				{"BuckHashSys", "gauge", fmt.Sprintf("%f", float64(memStats.BuckHashSys))},
+				{"Frees", "gauge", fmt.Sprintf("%f", float64(memStats.Frees))},
+				{"GCCPUFraction", "gauge", fmt.Sprintf("%f", memStats.GCCPUFraction)},
+				{"GCSys", "gauge", fmt.Sprintf("%f", float64(memStats.GCSys))},
+				{"HeapAlloc", "gauge", fmt.Sprintf("%f", float64(memStats.HeapAlloc))},
+				{"HeapIdle", "gauge", fmt.Sprintf("%f", float64(memStats.HeapIdle))},
+				{"HeapInuse", "gauge", fmt.Sprintf("%f", float64(memStats.HeapInuse))},
+				{"HeapObjects", "gauge", fmt.Sprintf("%f", float64(memStats.HeapObjects))},
+				{"HeapReleased", "gauge", fmt.Sprintf("%f", float64(memStats.HeapReleased))},
+				{"HeapSys", "gauge", fmt.Sprintf("%f", float64(memStats.HeapSys))},
+				{"LastGC", "gauge", fmt.Sprintf("%f", float64(memStats.LastGC))},
+				{"Lookups", "gauge", fmt.Sprintf("%f", float64(memStats.Lookups))},
+				{"MCacheInuse", "gauge", fmt.Sprintf("%f", float64(memStats.MCacheInuse))},
+				{"MCacheSys", "gauge", fmt.Sprintf("%f", float64(memStats.MCacheSys))},
+				{"MSpanInuse", "gauge", fmt.Sprintf("%f", float64(memStats.MSpanInuse))},
+				{"MSpanSys", "gauge", fmt.Sprintf("%f", float64(memStats.MSpanSys))},
+				{"Mallocs", "gauge", fmt.Sprintf("%f", float64(memStats.Mallocs))},
+				{"NextGC", "gauge", fmt.Sprintf("%f", float64(memStats.NextGC))},
+				{"NumForcedGC", "gauge", fmt.Sprintf("%f", float64(memStats.NumForcedGC))},
+				{"NumGC", "gauge", fmt.Sprintf("%f", float64(memStats.NumGC))},
+				{"OtherSys", "gauge", fmt.Sprintf("%f", float64(memStats.OtherSys))},
+				{"PauseTotalNs", "gauge", fmt.Sprintf("%f", float64(memStats.PauseTotalNs))},
+				{"StackInuse", "gauge", fmt.Sprintf("%f", float64(memStats.StackInuse))},
+				{"StackSys", "gauge", fmt.Sprintf("%f", float64(memStats.StackSys))},
+				{"Sys", "gauge", fmt.Sprintf("%f", float64(memStats.Sys))},
+				{"TotalAlloc", "gauge", fmt.Sprintf("%f", float64(memStats.TotalAlloc))},
+				{"RandomValue", "gauge", fmt.Sprintf("%f", rand.Float64())},
+			}
+			a.pollCount++
+			a.mu.Unlock()
+		case <-a.stopChan:
+			return
+		}
+	}
+}
+
+func (a *Agent) reportMetrics() {
+	ticker := time.NewTicker(a.reportInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			a.mu.Lock()
+			pollCountMetric := Metric{
+				Name:  "PollCount",
+				Type:  "counter",
+				Value: fmt.Sprintf("%d", a.pollCount),
+			}
+			allMetrics := append(a.metrics, pollCountMetric)
+			a.mu.Unlock()
+
+			for _, metric := range allMetrics {
+				url := fmt.Sprintf("%s/update/%s/%s/%s", a.serverURL, metric.Type, metric.Name, metric.Value)
+				req, err := http.NewRequest("POST", url, bytes.NewBufferString(metric.Value))
+				if err != nil {
+					continue
+				}
+				req.Header.Set("Content-Type", "text/plain")
+
+				resp, err := a.client.Do(req)
+				if err != nil {
+					continue
+				}
+				resp.Body.Close()
+			}
+		case <-a.stopChan:
+			return
+		}
+	}
+}
+
+func main() {
+	serverAddr, pollInterval, reportInterval := parseFlags()
+
+	agent := NewAgent(serverAddr, pollInterval, reportInterval)
+	agent.Run()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+
+	agent.Stop()
 }
