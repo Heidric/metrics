@@ -40,7 +40,6 @@ func TestHandlers(t *testing.T) {
 			},
 		}
 
-		// Создаем полноценный сервер с chi роутером
 		srv := NewServer(":8080", mock)
 		r := srv.Srv.Handler.(*chi.Mux)
 

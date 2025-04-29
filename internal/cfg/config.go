@@ -1,19 +1,45 @@
 package cfg
 
 import (
+	"os"
+	"time"
+
 	"github.com/Heidric/metrics.git/pkg/log"
+	"github.com/joho/godotenv"
+	"github.com/vrischmann/envconfig"
 )
 
 type Config struct {
-	Logger *log.Config
+	Logger         *log.Config
+	ServerAddress  string        `envconfig:"ADDRESS"`
+	PollInterval   time.Duration `envconfig:"POLL_INTERVAL"`
+	ReportInterval time.Duration `envconfig:"REPORT_INTERVAL"`
 }
 
 func NewConfig() (*Config, error) {
-	c := &Config{
+	_ = godotenv.Load()
+
+	config := &Config{
 		Logger: &log.Config{},
 	}
 
-	c.Logger.SetDefault()
+	defaults := map[string]string{
+		"ADDRESS":         "localhost:8080",
+		"POLL_INTERVAL":   "2s",
+		"REPORT_INTERVAL": "10s",
+	}
 
-	return c, nil
+	for key, value := range defaults {
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+
+	if err := envconfig.Init(config); err != nil {
+		return nil, err
+	}
+
+	config.Logger.SetDefault()
+
+	return config, nil
 }

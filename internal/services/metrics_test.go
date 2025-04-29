@@ -48,13 +48,11 @@ func TestMetricsService(t *testing.T) {
 		storage := &mockStorage{data: make(map[string]string)}
 		service := NewMetricsService(storage)
 
-		// First update
 		err := service.UpdateCounter("hits", "10")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Second update should increment
 		err = service.UpdateCounter("hits", "5")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)

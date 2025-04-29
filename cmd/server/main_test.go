@@ -2,108 +2,66 @@ package main
 
 import (
 	"flag"
-	"log"
-	"net/http"
-	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
-	"github.com/Heidric/metrics.git/internal/db"
-	"github.com/Heidric/metrics.git/internal/server"
-	"github.com/Heidric/metrics.git/internal/services"
+	"github.com/stretchr/testify/require"
 )
 
-func TestServerEndpoints(t *testing.T) {
-	storage := db.NewStore()
-	defer storage.Close()
-	service := services.NewMetricsService(storage)
-	srv := server.NewServer(":8080", service)
-	testServer := httptest.NewServer(srv.Srv.Handler)
-	defer testServer.Close()
-
+func TestLoadConfig(t *testing.T) {
 	tests := []struct {
-		name       string
-		method     string
-		url        string
-		wantStatus int
+		name        string
+		setup       func()
+		wantAddress string
 	}{
 		{
-			name:       "List metrics",
-			method:     "GET",
-			url:        "/",
-			wantStatus: http.StatusOK,
+			name: "default address",
+			setup: func() {
+				os.Unsetenv("ADDRESS")
+				os.Args = []string{"cmd"}
+			},
+			wantAddress: "localhost:8080",
 		},
 		{
-			name:       "Update gauge",
-			method:     "POST",
-			url:        "/update/gauge/temp/42.5",
-			wantStatus: http.StatusOK,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req, err := http.NewRequest(tt.method, testServer.URL+tt.url, nil)
-			if err != nil {
-				t.Fatalf("Failed to create request: %v", err)
-			}
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatalf("Request failed: %v", err)
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != tt.wantStatus {
-				t.Errorf("Expected status %d, got %d", tt.wantStatus, resp.StatusCode)
-			}
-		})
-	}
-}
-
-func TestGetServerAddress(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []string
-		wantAddr string
-		wantErr  bool
-	}{
-		{
-			name:     "Default address",
-			args:     []string{},
-			wantAddr: "localhost:8080",
-			wantErr:  false,
+			name: "env address",
+			setup: func() {
+				os.Setenv("ADDRESS", "env:8081")
+				os.Args = []string{"cmd"}
+			},
+			wantAddress: "env:8081",
 		},
 		{
-			name:     "Custom address",
-			args:     []string{"-a=127.0.0.1:9090"},
-			wantAddr: "127.0.0.1:9090",
-			wantErr:  false,
+			name: "flag address",
+			setup: func() {
+				os.Unsetenv("ADDRESS")
+				os.Args = []string{"cmd", "-a=flag:8082"}
+			},
+			wantAddress: "flag:8082",
+		},
+		{
+			name: "flag overrides env",
+			setup: func() {
+				os.Setenv("ADDRESS", "env:8083")
+				os.Args = []string{"cmd", "-a=flag:8084"}
+			},
+			wantAddress: "flag:8084",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			oldArgs := os.Args
-			oldFlagCommandLine := flag.CommandLine
+			defer func() { os.Args = oldArgs }()
+
+			tt.setup()
 			defer func() {
-				os.Args = oldArgs
-				flag.CommandLine = oldFlagCommandLine
+				os.Unsetenv("ADDRESS")
 			}()
 
-			os.Args = append([]string{"cmd"}, tt.args...)
-			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-
-			var buf strings.Builder
-			log.SetOutput(&buf)
-			defer log.SetOutput(os.Stderr)
-
-			addr := getServerAddress()
-
-			if addr != tt.wantAddr {
-				t.Errorf("Expected address %q, got %q", tt.wantAddr, addr)
-			}
+			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+			config, err := loadConfig()
+			require.NoError(t, err)
+			require.Equal(t, tt.wantAddress, config.ServerAddress)
 		})
 	}
 }

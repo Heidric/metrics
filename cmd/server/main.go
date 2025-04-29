@@ -16,15 +16,36 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func main() {
-	addr := getServerAddress()
+type Config struct {
+	cfg.Config
+	flagAddress string
+}
 
+func loadConfig() (*Config, error) {
+	baseCfg, err := cfg.NewConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	config := &Config{Config: *baseCfg}
+
+	flag.StringVar(&config.flagAddress, "a", "", "HTTP server endpoint address")
+	flag.Parse()
+
+	if config.flagAddress != "" {
+		config.ServerAddress = config.flagAddress
+	}
+
+	return config, nil
+}
+
+func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
 	runner, ctx := errgroup.WithContext(ctx)
 
-	config, err := cfg.NewConfig()
+	config, err := loadConfig()
 	if err != nil {
 		log.Fatal(err, "Load config")
 	}
@@ -38,7 +59,7 @@ func main() {
 	storage := db.GetInstance()
 	metrics := services.NewMetricsService(storage)
 
-	server := server.NewServer(addr, metrics)
+	server := server.NewServer(config.ServerAddress, metrics)
 	server.Run(ctx, runner)
 
 	runner.Go(func() error {
@@ -48,17 +69,4 @@ func main() {
 	})
 
 	runner.Wait()
-}
-
-func getServerAddress() string {
-	addr := flag.String("a", "localhost:8080", "HTTP server endpoint address")
-	flag.Parse()
-
-	if flag.NArg() > 0 {
-		log.Printf("Error: unknown flags or arguments: %v\n", flag.Args())
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	return *addr
 }
