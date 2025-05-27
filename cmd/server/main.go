@@ -50,11 +50,11 @@ func main() {
 		log.Fatal(err, "Load config")
 	}
 
-	logger, err := logger.IniInitialize(config.Logger)
+	logInstance, err := logger.IniInitialize(config.Logger)
 	if err != nil {
 		log.Fatal(err, "Init logger")
 	}
-	ctx = logger.Zerolog().WithContext(ctx)
+	ctx = logInstance.Zerolog().WithContext(ctx)
 
 	storage := db.GetInstance()
 	metrics := services.NewMetricsService(storage)
