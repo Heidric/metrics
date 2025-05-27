@@ -19,6 +19,7 @@ func TestLoadConfig(t *testing.T) {
 			setup: func() {
 				os.Unsetenv("ADDRESS")
 				os.Args = []string{"cmd"}
+				flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 			},
 			wantAddress: "localhost:8080",
 		},
@@ -27,6 +28,7 @@ func TestLoadConfig(t *testing.T) {
 			setup: func() {
 				os.Setenv("ADDRESS", "env:8081")
 				os.Args = []string{"cmd"}
+				flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 			},
 			wantAddress: "env:8081",
 		},
@@ -35,6 +37,7 @@ func TestLoadConfig(t *testing.T) {
 			setup: func() {
 				os.Unsetenv("ADDRESS")
 				os.Args = []string{"cmd", "-a=flag:8082"}
+				flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 			},
 			wantAddress: "flag:8082",
 		},
@@ -43,6 +46,7 @@ func TestLoadConfig(t *testing.T) {
 			setup: func() {
 				os.Setenv("ADDRESS", "env:8083")
 				os.Args = []string{"cmd", "-a=flag:8084"}
+				flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 			},
 			wantAddress: "flag:8084",
 		},
@@ -51,14 +55,17 @@ func TestLoadConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			oldArgs := os.Args
-			defer func() { os.Args = oldArgs }()
+			oldEnv := os.Getenv("ADDRESS")
+			oldFlags := flag.CommandLine
 
-			tt.setup()
 			defer func() {
-				os.Unsetenv("ADDRESS")
+				os.Args = oldArgs
+				os.Setenv("ADDRESS", oldEnv)
+				flag.CommandLine = oldFlags
 			}()
 
-			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+			tt.setup()
+
 			config, err := loadConfig()
 			require.NoError(t, err)
 			require.Equal(t, tt.wantAddress, config.ServerAddress)

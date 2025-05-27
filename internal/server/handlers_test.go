@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/go-chi/chi"
+	"github.com/rs/zerolog"
 )
 
 type mockMetrics struct {
@@ -33,6 +35,10 @@ func (m *mockMetrics) ListMetrics() map[string]string {
 }
 
 func TestHandlers(t *testing.T) {
+	// Инициализируем тестовый логгер
+	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
+	logger.Log = &testLogger
+
 	t.Run("UpdateGauge success", func(t *testing.T) {
 		mock := &mockMetrics{
 			updateGaugeFn: func(name, value string) error {
