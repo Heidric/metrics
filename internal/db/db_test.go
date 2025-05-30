@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -9,8 +10,15 @@ import (
 )
 
 func TestStore(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "db_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempFile.Close()
+	defer os.Remove(tempFile.Name())
+
 	t.Run("Set and Get", func(t *testing.T) {
-		store := NewStore()
+		store := NewStore("", 0)
 		defer store.Close()
 
 		store.Set("key1", "value1")
@@ -25,7 +33,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("Get non-existent key", func(t *testing.T) {
-		store := NewStore()
+		store := NewStore("", 0)
 		defer store.Close()
 
 		_, err := store.Get("nonexistent")
@@ -35,7 +43,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		store := NewStore()
+		store := NewStore("", 0)
 		defer store.Close()
 
 		store.Set("key1", "value1")
@@ -48,7 +56,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("GetAll", func(t *testing.T) {
-		store := NewStore()
+		store := NewStore("", 0)
 		defer store.Close()
 
 		store.Set("key1", "value1")
@@ -64,7 +72,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("Concurrent access", func(t *testing.T) {
-		store := NewStore()
+		store := NewStore("", 0)
 		defer store.Close()
 
 		go func() {
@@ -89,12 +97,31 @@ func TestStore(t *testing.T) {
 		}
 	})
 
-	t.Run("Singleton", func(t *testing.T) {
-		store1 := GetInstance()
-		store2 := GetInstance()
+	t.Run("File persistence", func(t *testing.T) {
+		store1 := NewStore(tempFile.Name(), 0)
+		store1.Set("persistent", "value")
+		if err := store1.Close(); err != nil {
+			t.Fatalf("Failed to close store: %v", err)
+		}
 
-		if store1 != store2 {
-			t.Fatal("GetInstance should return the same instance")
+		store2 := NewStore(tempFile.Name(), 0)
+		defer store2.Close()
+
+		value, err := store2.Get("persistent")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if value != "value" {
+			t.Fatalf("Expected 'value', got '%s'", value)
+		}
+	})
+
+	t.Run("Close error handling", func(t *testing.T) {
+		store := NewStore("/invalid/path/db.json", 0)
+		store.Set("key", "value")
+		err := store.Close()
+		if err == nil {
+			t.Fatal("Expected error when closing with invalid path")
 		}
 	})
 }

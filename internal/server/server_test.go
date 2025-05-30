@@ -3,7 +3,9 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -15,7 +17,14 @@ func TestServerRoutes(t *testing.T) {
 	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
 	logger.Log = &testLogger
 
-	storage := db.NewStore()
+	tmpFile, err := os.CreateTemp("", "testdb-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	storage := db.NewStore(tmpPath, 300*time.Second)
 	defer storage.Close()
 	service := services.NewMetricsService(storage)
 

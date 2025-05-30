@@ -11,10 +11,13 @@ import (
 )
 
 type Config struct {
-	Logger         *log.Config
-	ServerAddress  string        `envconfig:"ADDRESS"`
-	PollInterval   time.Duration `envconfig:"POLL_INTERVAL"`
-	ReportInterval time.Duration `envconfig:"REPORT_INTERVAL"`
+	Logger          *log.Config
+	ServerAddress   string        `envconfig:"ADDRESS"`
+	PollInterval    time.Duration `envconfig:"POLL_INTERVAL"`
+	ReportInterval  time.Duration `envconfig:"REPORT_INTERVAL"`
+	StoreInterval   time.Duration `envconfig:"STORE_INTERVAL"`
+	FileStoragePath string        `envconfig:"FILE_STORAGE_PATH"`
+	Restore         bool          `envconfig:"RESTORE"`
 }
 
 func NewConfig() (*Config, error) {
@@ -25,9 +28,12 @@ func NewConfig() (*Config, error) {
 	}
 
 	defaults := map[string]string{
-		"ADDRESS":         "localhost:8080",
-		"POLL_INTERVAL":   "2s",
-		"REPORT_INTERVAL": "10s",
+		"ADDRESS":           "localhost:8080",
+		"POLL_INTERVAL":     "2s",
+		"REPORT_INTERVAL":   "10s",
+		"STORE_INTERVAL":    "300s",
+		"FILE_STORAGE_PATH": "/tmp/metrics-db.json",
+		"RESTORE":           "true",
 	}
 
 	for key, value := range defaults {
@@ -44,6 +50,11 @@ func NewConfig() (*Config, error) {
 	if val := os.Getenv("REPORT_INTERVAL"); val != "" {
 		if sec, err := strconv.Atoi(val); err == nil {
 			os.Setenv("REPORT_INTERVAL", strconv.Itoa(sec)+"s")
+		}
+	}
+	if val := os.Getenv("STORE_INTERVAL"); val != "" {
+		if sec, err := strconv.Atoi(val); err == nil {
+			os.Setenv("STORE_INTERVAL", strconv.Itoa(sec)+"s")
 		}
 	}
 

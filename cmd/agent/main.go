@@ -181,7 +181,6 @@ func (a *Agent) reportMetrics() {
 					continue
 				}
 
-				// Сжимаем данные перед отправкой
 				compressedBody, err := a.compressData(body)
 				if err != nil {
 					continue

@@ -30,7 +30,6 @@ type Server struct {
 	logger  *zerolog.Logger
 }
 
-// Обертка для ResponseWriter с поддержкой gzip
 type gzipResponseWriter struct {
 	io.Writer
 	http.ResponseWriter
@@ -50,7 +49,6 @@ func NewServer(addr string, metrics Metrics) *Server {
 		logger:  &logger,
 	}
 
-	// Middleware для обработки gzip
 	r.Use(s.gzipMiddleware)
 	r.Use(s.loggingMiddleware)
 
@@ -69,7 +67,6 @@ func NewServer(addr string, metrics Metrics) *Server {
 
 func (s *Server) gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Распаковываем входящий запрос, если он сжат
 		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
 			gz, err := gzip.NewReader(r.Body)
 			if err != nil {
@@ -80,9 +77,7 @@ func (s *Server) gzipMiddleware(next http.Handler) http.Handler {
 			r.Body = gz
 		}
 
-		// Проверяем, поддерживает ли клиент сжатие ответов
 		acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
-
 		if !acceptsGzip {
 			next.ServeHTTP(w, r)
 			return
