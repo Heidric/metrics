@@ -63,7 +63,7 @@ func (ms *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
 		if metric.Value == nil {
 			return errors.ErrInvalidValue
 		}
-		ms.storage.Set(metric.ID, fmt.Sprintf("%f", *metric.Value))
+		ms.storage.Set(metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
 		return nil
 	case "counter":
 		if metric.Delta == nil {

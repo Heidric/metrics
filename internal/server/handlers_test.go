@@ -49,7 +49,6 @@ func (m *mockMetrics) GetMetricJSON(metric *model.Metrics) error {
 }
 
 func TestHandlers(t *testing.T) {
-	// Инициализируем тестовый логгер
 	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
 	logger.Log = &testLogger
 

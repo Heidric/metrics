@@ -12,7 +12,6 @@ import (
 )
 
 func TestServerRoutes(t *testing.T) {
-	// Инициализируем тестовый логгер
 	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
 	logger.Log = &testLogger
 
