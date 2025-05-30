@@ -35,8 +35,20 @@ func ValidationError(w http.ResponseWriter, details string) {
 }
 
 func NotFoundError(w http.ResponseWriter) {
+	res := CommonError{
+		Title:   "Not found",
+		Status:  http.StatusNotFound,
+		Details: "Requested resource not found",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w)
+
+	// Добавим обработку ошибки кодирования
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		// Если не удалось закодировать JSON, пишем простой текст
+		w.Write([]byte(`{"title":"Encoding Error","status":500,"detail":"Failed to encode error response"}`))
+	}
 }
 
 func InternalError(w http.ResponseWriter) {
