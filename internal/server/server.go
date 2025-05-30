@@ -1,8 +1,11 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -27,6 +30,16 @@ type Server struct {
 	logger  *zerolog.Logger
 }
 
+// Обертка для ResponseWriter с поддержкой gzip
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (g gzipResponseWriter) Write(b []byte) (int, error) {
+	return g.Writer.Write(b)
+}
+
 func NewServer(addr string, metrics Metrics) *Server {
 	logger := zerolog.Nop()
 
@@ -37,6 +50,8 @@ func NewServer(addr string, metrics Metrics) *Server {
 		logger:  &logger,
 	}
 
+	// Middleware для обработки gzip
+	r.Use(s.gzipMiddleware)
 	r.Use(s.loggingMiddleware)
 
 	r.Route("/", func(r chi.Router) {
@@ -50,6 +65,36 @@ func NewServer(addr string, metrics Metrics) *Server {
 	r.NotFound(s.notFoundHandler)
 
 	return s
+}
+
+func (s *Server) gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Распаковываем входящий запрос, если он сжат
+		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "Invalid gzip body", http.StatusBadRequest)
+				return
+			}
+			defer gz.Close()
+			r.Body = gz
+		}
+
+		// Проверяем, поддерживает ли клиент сжатие ответов
+		acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+
+		if !acceptsGzip {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		gzWriter := gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		next.ServeHTTP(gzWriter, r)
+	})
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {

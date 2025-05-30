@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -69,6 +70,21 @@ func (a *Agent) Run() {
 
 func (a *Agent) Stop() {
 	close(a.stopChan)
+}
+
+func (a *Agent) compressData(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+
+	if _, err := gz.Write(data); err != nil {
+		return nil, err
+	}
+
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (a *Agent) pollMetrics() {
@@ -165,12 +181,20 @@ func (a *Agent) reportMetrics() {
 					continue
 				}
 
+				// Сжимаем данные перед отправкой
+				compressedBody, err := a.compressData(body)
+				if err != nil {
+					continue
+				}
+
 				url := a.serverURL + "/update/"
-				req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+				req, err := http.NewRequest("POST", url, bytes.NewReader(compressedBody))
 				if err != nil {
 					continue
 				}
 				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Content-Encoding", "gzip")
+				req.Header.Set("Accept-Encoding", "gzip")
 
 				resp, err := a.client.Do(req)
 				if err != nil {
