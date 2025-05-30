@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -9,11 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/cfg"
+	"github.com/Heidric/metrics.git/internal/model"
 )
 
 type Metric struct {
@@ -27,7 +30,7 @@ type Agent struct {
 	pollInterval   time.Duration
 	reportInterval time.Duration
 	metrics        []Metric
-	pollCount      int64
+	pollCountDelta int64
 	client         *http.Client
 	mu             sync.Mutex
 	stopChan       chan struct{}
@@ -66,18 +69,6 @@ func (a *Agent) Run() {
 
 func (a *Agent) Stop() {
 	close(a.stopChan)
-}
-
-func (a *Agent) GetMetrics() []Metric {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.metrics
-}
-
-func (a *Agent) GetPollCount() int64 {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.pollCount
 }
 
 func (a *Agent) pollMetrics() {
@@ -121,7 +112,7 @@ func (a *Agent) pollMetrics() {
 				{"TotalAlloc", "gauge", fmt.Sprintf("%f", float64(memStats.TotalAlloc))},
 				{"RandomValue", "gauge", fmt.Sprintf("%f", rand.Float64())},
 			}
-			a.pollCount++
+			a.pollCountDelta++
 			a.mu.Unlock()
 		case <-a.stopChan:
 			return
@@ -137,21 +128,49 @@ func (a *Agent) reportMetrics() {
 		select {
 		case <-ticker.C:
 			a.mu.Lock()
+			delta := a.pollCountDelta
+			a.pollCountDelta = 0
 			pollCountMetric := Metric{
 				Name:  "PollCount",
 				Type:  "counter",
-				Value: fmt.Sprintf("%d", a.pollCount),
+				Value: fmt.Sprintf("%d", delta),
 			}
 			allMetrics := append(a.metrics, pollCountMetric)
 			a.mu.Unlock()
 
 			for _, metric := range allMetrics {
-				url := fmt.Sprintf("%s/update/%s/%s/%s", a.serverURL, metric.Type, metric.Name, metric.Value)
-				req, err := http.NewRequest("POST", url, bytes.NewBufferString(metric.Value))
+				var m model.Metrics
+				var body []byte
+				var err error
+
+				if metric.Type == "counter" {
+					delta, _ := strconv.ParseInt(metric.Value, 10, 64)
+					m = model.Metrics{
+						ID:    metric.Name,
+						MType: metric.Type,
+						Delta: &delta,
+					}
+					body, err = json.Marshal(m)
+				} else {
+					value, _ := strconv.ParseFloat(metric.Value, 64)
+					m = model.Metrics{
+						ID:    metric.Name,
+						MType: metric.Type,
+						Value: &value,
+					}
+					body, err = json.Marshal(m)
+				}
+
 				if err != nil {
 					continue
 				}
-				req.Header.Set("Content-Type", "text/plain")
+
+				url := a.serverURL + "/update/"
+				req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+				if err != nil {
+					continue
+				}
+				req.Header.Set("Content-Type", "application/json")
 
 				resp, err := a.client.Do(req)
 				if err != nil {

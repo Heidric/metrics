@@ -10,6 +10,7 @@ var (
 	ErrInvalidValue           = errors.New("invalid value")
 	ErrKeyNotFound            = errors.New("key not found")
 	ErrUnexpectedResponseType = errors.New("unexpected response type")
+	ErrInvalidType            = errors.New("invalid metric type")
 )
 
 type CommonError struct {

@@ -1,11 +1,13 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/go-chi/chi"
 )
 
@@ -82,4 +84,52 @@ func (s *Server) listMetricsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	errors.NotFoundError(w)
+}
+
+func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
+	var metric model.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
+		errors.ValidationError(w, "Invalid JSON format")
+		return
+	}
+
+	if err := s.metrics.UpdateMetricJSON(&metric); err != nil {
+		switch err {
+		case errors.ErrInvalidType, errors.ErrInvalidValue:
+			errors.ValidationError(w, err.Error())
+		case errors.ErrKeyNotFound:
+			errors.NotFoundError(w)
+		default:
+			errors.InternalError(w)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(metric)
+}
+
+func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
+	var metric model.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
+		errors.ValidationError(w, "Invalid JSON format")
+		return
+	}
+
+	if err := s.metrics.GetMetricJSON(&metric); err != nil {
+		switch err {
+		case errors.ErrInvalidType:
+			errors.ValidationError(w, err.Error())
+		case errors.ErrKeyNotFound:
+			errors.NotFoundError(w)
+		default:
+			errors.InternalError(w)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(metric)
 }

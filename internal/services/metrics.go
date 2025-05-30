@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/model"
 )
 
 type MetricsStorage interface {
@@ -54,4 +55,57 @@ func (ms *MetricsService) GetMetric(metricType, metricName string) (string, erro
 
 func (ms *MetricsService) ListMetrics() map[string]string {
 	return ms.storage.GetAll()
+}
+
+func (ms *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
+	switch metric.MType {
+	case "gauge":
+		if metric.Value == nil {
+			return errors.ErrInvalidValue
+		}
+		ms.storage.Set(metric.ID, fmt.Sprintf("%f", *metric.Value))
+		return nil
+	case "counter":
+		if metric.Delta == nil {
+			return errors.ErrInvalidValue
+		}
+		current := int64(0)
+		if strValue, err := ms.storage.Get(metric.ID); err == nil {
+			if val, err := strconv.ParseInt(strValue, 10, 64); err == nil {
+				current = val
+			}
+		}
+		newValue := current + *metric.Delta
+		ms.storage.Set(metric.ID, fmt.Sprintf("%d", newValue))
+		metric.Delta = &newValue
+		return nil
+	default:
+		return errors.ErrInvalidType
+	}
+}
+
+func (ms *MetricsService) GetMetricJSON(metric *model.Metrics) error {
+	strValue, err := ms.storage.Get(metric.ID)
+	if err != nil {
+		return err
+	}
+
+	switch metric.MType {
+	case "gauge":
+		val, err := strconv.ParseFloat(strValue, 64)
+		if err != nil {
+			return errors.ErrInvalidValue
+		}
+		metric.Value = &val
+		return nil
+	case "counter":
+		val, err := strconv.ParseInt(strValue, 10, 64)
+		if err != nil {
+			return errors.ErrInvalidValue
+		}
+		metric.Delta = &val
+		return nil
+	default:
+		return errors.ErrInvalidType
+	}
 }
