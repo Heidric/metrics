@@ -47,8 +47,13 @@ func parseFlags() (string, time.Duration, time.Duration) {
 	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")
 	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
 	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
+	databaseDSN := flag.String("d", config.DatabaseDSN, "Database DSN")
 
 	flag.Parse()
+
+	if *databaseDSN != "" {
+		config.DatabaseDSN = *databaseDSN
+	}
 
 	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second
 }

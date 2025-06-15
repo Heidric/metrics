@@ -133,3 +133,11 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(metric)
 }
+
+func (s *Server) pingHandler(w http.ResponseWriter, r *http.Request) {
+	if err := s.metrics.Ping(r.Context()); err != nil {
+		errors.InternalError(w)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

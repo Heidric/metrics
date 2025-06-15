@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -24,10 +23,19 @@ func TestServerRoutes(t *testing.T) {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	storage := db.NewStore(tmpPath, 300*time.Second)
+	storage := db.NewStore("", 0)
 	defer storage.Close()
-	service := services.NewMetricsService(storage)
 
+	err = storage.SetGauge("temp", 42.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = storage.SetCounter("requests", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	service := services.NewMetricsService(storage)
 	srv := NewServer(":8080", service)
 	testServer := httptest.NewServer(srv.Srv.Handler)
 	defer testServer.Close()
@@ -73,6 +81,12 @@ func TestServerRoutes(t *testing.T) {
 			method:     "GET",
 			path:       "/unknown",
 			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "Ping handler",
+			method:     "GET",
+			path:       "/ping",
+			wantStatus: http.StatusOK,
 		},
 	}
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,10 @@ type mockMetrics struct {
 	listMetricsFn      func() map[string]string
 	updateMetricJSONFn func(metric *model.Metrics) error
 	getMetricJSONFn    func(metric *model.Metrics) error
+}
+
+func (m *mockMetrics) Ping(ctx context.Context) error {
+	return nil
 }
 
 func (m *mockMetrics) UpdateGauge(name, value string) error {

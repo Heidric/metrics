@@ -22,6 +22,7 @@ type Metrics interface {
 	UpdateCounter(name, value string) error
 	UpdateMetricJSON(metric *model.Metrics) error
 	GetMetricJSON(metric *model.Metrics) error
+	Ping(ctx context.Context) error
 }
 
 type Server struct {
@@ -58,6 +59,7 @@ func NewServer(addr string, metrics Metrics) *Server {
 		r.Get("/value/{metricType}/{metricName}", s.getMetricHandler)
 		r.Post("/update/", s.updateMetricJSONHandler)
 		r.Post("/value/", s.getMetricJSONHandler)
+		r.Get("/ping", s.pingHandler)
 	})
 
 	r.NotFound(s.notFoundHandler)

@@ -7,17 +7,17 @@ import (
 
 	"github.com/Heidric/metrics.git/pkg/log"
 	"github.com/joho/godotenv"
-	"github.com/vrischmann/envconfig"
 )
 
 type Config struct {
 	Logger          *log.Config
-	ServerAddress   string        `envconfig:"ADDRESS"`
-	PollInterval    time.Duration `envconfig:"POLL_INTERVAL"`
-	ReportInterval  time.Duration `envconfig:"REPORT_INTERVAL"`
-	StoreInterval   time.Duration `envconfig:"STORE_INTERVAL"`
-	FileStoragePath string        `envconfig:"FILE_STORAGE_PATH"`
-	Restore         bool          `envconfig:"RESTORE"`
+	ServerAddress   string
+	PollInterval    time.Duration
+	ReportInterval  time.Duration
+	StoreInterval   time.Duration
+	FileStoragePath string
+	Restore         bool
+	DatabaseDSN     string
 }
 
 func NewConfig() (*Config, error) {
@@ -27,42 +27,42 @@ func NewConfig() (*Config, error) {
 		Logger: &log.Config{},
 	}
 
-	defaults := map[string]string{
-		"ADDRESS":           "localhost:8080",
-		"POLL_INTERVAL":     "2s",
-		"REPORT_INTERVAL":   "10s",
-		"STORE_INTERVAL":    "300s",
-		"FILE_STORAGE_PATH": "/tmp/metrics-db.json",
-		"RESTORE":           "true",
-	}
-
-	for key, value := range defaults {
-		if os.Getenv(key) == "" {
-			os.Setenv(key, value)
-		}
-	}
-
-	if val := os.Getenv("POLL_INTERVAL"); val != "" {
-		if sec, err := strconv.Atoi(val); err == nil {
-			os.Setenv("POLL_INTERVAL", strconv.Itoa(sec)+"s")
-		}
-	}
-	if val := os.Getenv("REPORT_INTERVAL"); val != "" {
-		if sec, err := strconv.Atoi(val); err == nil {
-			os.Setenv("REPORT_INTERVAL", strconv.Itoa(sec)+"s")
-		}
-	}
-	if val := os.Getenv("STORE_INTERVAL"); val != "" {
-		if sec, err := strconv.Atoi(val); err == nil {
-			os.Setenv("STORE_INTERVAL", strconv.Itoa(sec)+"s")
-		}
-	}
-
-	if err := envconfig.Init(config); err != nil {
-		return nil, err
-	}
+	config.ServerAddress = getEnv("ADDRESS", "localhost:8080")
+	config.PollInterval = parseDuration("POLL_INTERVAL", 2*time.Second)
+	config.ReportInterval = parseDuration("REPORT_INTERVAL", 10*time.Second)
+	config.StoreInterval = parseDuration("STORE_INTERVAL", 300*time.Second)
+	config.FileStoragePath = getEnv("FILE_STORAGE_PATH", "/tmp/metrics-db.json")
+	config.Restore = parseBool("RESTORE", true)
+	config.DatabaseDSN = getEnv("DATABASE_DSN", "")
 
 	config.Logger.SetDefault()
-
 	return config, nil
+}
+
+func getEnv(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
+
+func parseDuration(key string, defaultValue time.Duration) time.Duration {
+	if value, exists := os.LookupEnv(key); exists {
+		if sec, err := strconv.Atoi(value); err == nil {
+			return time.Duration(sec) * time.Second
+		}
+		if dur, err := time.ParseDuration(value); err == nil {
+			return dur
+		}
+	}
+	return defaultValue
+}
+
+func parseBool(key string, defaultValue bool) bool {
+	if value, exists := os.LookupEnv(key); exists {
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
+		}
+	}
+	return defaultValue
 }

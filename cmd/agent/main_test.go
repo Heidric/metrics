@@ -23,6 +23,7 @@ func TestParseFlags(t *testing.T) {
 				os.Unsetenv("ADDRESS")
 				os.Unsetenv("POLL_INTERVAL")
 				os.Unsetenv("REPORT_INTERVAL")
+				os.Unsetenv("DATABASE_DSN")
 				os.Args = []string{"cmd"}
 			},
 			wantAddress: "localhost:8080",
@@ -35,6 +36,7 @@ func TestParseFlags(t *testing.T) {
 				os.Setenv("ADDRESS", "env:8081")
 				os.Setenv("POLL_INTERVAL", "3s")
 				os.Setenv("REPORT_INTERVAL", "15s")
+				os.Setenv("DATABASE_DSN", "env-dsn")
 				os.Args = []string{"cmd"}
 			},
 			wantAddress: "env:8081",
@@ -47,6 +49,7 @@ func TestParseFlags(t *testing.T) {
 				os.Unsetenv("ADDRESS")
 				os.Unsetenv("POLL_INTERVAL")
 				os.Unsetenv("REPORT_INTERVAL")
+				os.Unsetenv("DATABASE_DSN")
 				os.Args = []string{"cmd", "-a=flag:8082", "-p=4", "-r=20"}
 			},
 			wantAddress: "flag:8082",
@@ -58,15 +61,21 @@ func TestParseFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			oldArgs := os.Args
-			defer func() { os.Args = oldArgs }()
-
-			tt.setup()
+			oldEnv := map[string]string{
+				"ADDRESS":         os.Getenv("ADDRESS"),
+				"POLL_INTERVAL":   os.Getenv("POLL_INTERVAL"),
+				"REPORT_INTERVAL": os.Getenv("REPORT_INTERVAL"),
+				"DATABASE_DSN":    os.Getenv("DATABASE_DSN"),
+			}
 			defer func() {
-				os.Unsetenv("ADDRESS")
-				os.Unsetenv("POLL_INTERVAL")
-				os.Unsetenv("REPORT_INTERVAL")
+				os.Args = oldArgs
+				for k, v := range oldEnv {
+					os.Setenv(k, v)
+				}
+				flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 			}()
 
+			tt.setup()
 			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 			address, poll, report := parseFlags()
 			require.Equal(t, tt.wantAddress, address)

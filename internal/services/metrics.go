@@ -1,111 +1,121 @@
 package services
 
 import (
-	"fmt"
+	"context"
 	"strconv"
 
+	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/errors"
 	"github.com/Heidric/metrics.git/internal/model"
 )
 
-type MetricsStorage interface {
-	Set(key, value string)
-	Get(key string) (string, error)
-	GetAll() map[string]string
-}
-
 type MetricsService struct {
-	storage MetricsStorage
+	storage db.MetricsStorage
 }
 
-func NewMetricsService(storage MetricsStorage) *MetricsService {
+func NewMetricsService(storage db.MetricsStorage) *MetricsService {
 	return &MetricsService{storage: storage}
 }
 
-func (ms *MetricsService) UpdateGauge(name, value string) error {
-	_, err := strconv.ParseFloat(value, 64)
+func (m *MetricsService) ListMetrics() map[string]string {
+	result := make(map[string]string)
+	gauges, counters, err := m.storage.GetAll()
 	if err != nil {
-		return errors.ErrInvalidValue
+		return result
 	}
-	ms.storage.Set(name, value)
-	return nil
+
+	for name, value := range gauges {
+		result[name] = strconv.FormatFloat(value, 'f', -1, 64)
+	}
+	for name, delta := range counters {
+		result[name] = strconv.FormatInt(delta, 10)
+	}
+	return result
 }
 
-func (ms *MetricsService) UpdateCounter(name, value string) error {
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		return errors.ErrInvalidValue
-	}
-
-	current := 0
-	if strValue, err := ms.storage.Get(name); err == nil {
-		current, err = strconv.Atoi(strValue)
+func (m *MetricsService) GetMetric(metricType, metricName string) (string, error) {
+	switch metricType {
+	case "gauge":
+		val, err := m.storage.GetGauge(metricName)
 		if err != nil {
-			return err
+			return "", err
 		}
+		return strconv.FormatFloat(val, 'f', -1, 64), nil
+	case "counter":
+		val, err := m.storage.GetCounter(metricName)
+		if err != nil {
+			return "", err
+		}
+		return strconv.FormatInt(val, 10), nil
+	default:
+		return "", errors.ErrInvalidType
+	}
+}
+
+func (m *MetricsService) UpdateGauge(name, value string) error {
+	val, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return errors.ErrInvalidValue
+	}
+	return m.storage.SetGauge(name, val)
+}
+
+func (m *MetricsService) UpdateCounter(name, value string) error {
+	delta, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return errors.ErrInvalidValue
+	}
+	return m.storage.SetCounter(name, delta)
+}
+
+func (m *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
+	if metric == nil {
+		return errors.ErrInvalidValue
 	}
 
-	ms.storage.Set(name, fmt.Sprintf("%d", current+intValue))
-	return nil
-}
-
-func (ms *MetricsService) GetMetric(metricType, metricName string) (string, error) {
-	return ms.storage.Get(metricName)
-}
-
-func (ms *MetricsService) ListMetrics() map[string]string {
-	return ms.storage.GetAll()
-}
-
-func (ms *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
 	switch metric.MType {
 	case "gauge":
 		if metric.Value == nil {
 			return errors.ErrInvalidValue
 		}
-		ms.storage.Set(metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
-		return nil
+		return m.storage.SetGauge(metric.ID, *metric.Value)
 	case "counter":
 		if metric.Delta == nil {
 			return errors.ErrInvalidValue
 		}
-		current := int64(0)
-		if strValue, err := ms.storage.Get(metric.ID); err == nil {
-			if val, err := strconv.ParseInt(strValue, 10, 64); err == nil {
-				current = val
-			}
+		return m.storage.SetCounter(metric.ID, *metric.Delta)
+	default:
+		return errors.ErrInvalidType
+	}
+}
+
+func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
+	if metric == nil {
+		return errors.ErrInvalidValue
+	}
+
+	switch metric.MType {
+	case "gauge":
+		value, err := m.storage.GetGauge(metric.ID)
+		if err != nil {
+			return err
 		}
-		newValue := current + *metric.Delta
-		ms.storage.Set(metric.ID, fmt.Sprintf("%d", newValue))
-		metric.Delta = &newValue
+		metric.Value = &value
+		metric.Delta = nil
+		return nil
+	case "counter":
+		delta, err := m.storage.GetCounter(metric.ID)
+		if err != nil {
+			return err
+		}
+		metric.Delta = &delta
+		metric.Value = nil
 		return nil
 	default:
 		return errors.ErrInvalidType
 	}
 }
 
-func (ms *MetricsService) GetMetricJSON(metric *model.Metrics) error {
-	strValue, err := ms.storage.Get(metric.ID)
-	if err != nil {
-		return err
-	}
-
-	switch metric.MType {
-	case "gauge":
-		val, err := strconv.ParseFloat(strValue, 64)
-		if err != nil {
-			return errors.ErrInvalidValue
-		}
-		metric.Value = &val
-		return nil
-	case "counter":
-		val, err := strconv.ParseInt(strValue, 10, 64)
-		if err != nil {
-			return errors.ErrInvalidValue
-		}
-		metric.Delta = &val
-		return nil
-	default:
-		return errors.ErrInvalidType
-	}
+func (m *MetricsService) Ping(ctx context.Context) error {
+	return m.storage.Ping(ctx)
 }

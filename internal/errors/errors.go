@@ -12,6 +12,7 @@ var (
 	ErrUnexpectedResponseType = errors.New("unexpected response type")
 	ErrInvalidType            = errors.New("invalid metric type")
 	ErrStoreClosed            = errors.New("store is closed")
+	ErrNotConnected           = errors.New("database not connected")
 )
 
 type CommonError struct {
