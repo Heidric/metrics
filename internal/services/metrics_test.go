@@ -5,13 +5,15 @@ import (
 	"testing"
 
 	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockStorage struct {
-	gauges   map[string]float64
-	counters map[string]int64
+	gauges               map[string]float64
+	counters             map[string]int64
+	updateMetricsBatchFn func(metrics []*model.Metrics) error
 }
 
 func (m *mockStorage) SetGauge(name string, value float64) error {
@@ -47,6 +49,13 @@ func (m *mockStorage) GetCounter(name string) (int64, error) {
 
 func (m *mockStorage) GetAll() (map[string]float64, map[string]int64, error) {
 	return m.gauges, m.counters, nil
+}
+
+func (m *mockStorage) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	if m.updateMetricsBatchFn != nil {
+		return m.updateMetricsBatchFn(metrics)
+	}
+	return nil
 }
 
 func (m *mockStorage) Ping(ctx context.Context) error {

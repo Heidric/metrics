@@ -134,6 +134,23 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(metric)
 }
 
+func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var metrics []*model.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+		http.Error(w, "failed to decode metrics", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.metrics.UpdateMetricsBatch(metrics); err != nil {
+		http.Error(w, "batch update failed", http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) pingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := s.metrics.Ping(r.Context()); err != nil {
 		errors.InternalError(w)

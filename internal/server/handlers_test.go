@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -17,12 +18,13 @@ import (
 )
 
 type mockMetrics struct {
-	updateGaugeFn      func(name, value string) error
-	updateCounterFn    func(name, value string) error
-	getMetricFn        func(metricType, metricName string) (string, error)
-	listMetricsFn      func() map[string]string
-	updateMetricJSONFn func(metric *model.Metrics) error
-	getMetricJSONFn    func(metric *model.Metrics) error
+	updateGaugeFn        func(name, value string) error
+	updateCounterFn      func(name, value string) error
+	getMetricFn          func(metricType, metricName string) (string, error)
+	listMetricsFn        func() map[string]string
+	updateMetricJSONFn   func(metric *model.Metrics) error
+	getMetricJSONFn      func(metric *model.Metrics) error
+	updateMetricsBatchFn func(metrics []*model.Metrics) error
 }
 
 func (m *mockMetrics) Ping(ctx context.Context) error {
@@ -52,6 +54,17 @@ func (m *mockMetrics) UpdateMetricJSON(metric *model.Metrics) error {
 func (m *mockMetrics) GetMetricJSON(metric *model.Metrics) error {
 	return m.getMetricJSONFn(metric)
 }
+
+func (m *mockMetrics) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	if m.updateMetricsBatchFn != nil {
+		return m.updateMetricsBatchFn(metrics)
+	}
+	return nil
+}
+
+func ptrFloat64(v float64) *float64 { return &v }
+
+func ptrInt64(v int64) *int64 { return &v }
 
 func TestHandlers(t *testing.T) {
 	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
@@ -287,6 +300,50 @@ func TestHandlers(t *testing.T) {
 
 		if response.Title != "Not found" {
 			t.Error("unexpected error response")
+		}
+	})
+
+	t.Run("UpdateMetricsBatch success", func(t *testing.T) {
+		mock := &mockMetrics{
+			updateMetricsBatchFn: func(metrics []*model.Metrics) error {
+				if len(metrics) != 2 {
+					t.Errorf("expected 2 metrics, got %d", len(metrics))
+				}
+				return nil
+			},
+		}
+
+		srv := NewServer(":8080", mock)
+		r := srv.Srv.Handler.(*chi.Mux)
+
+		metrics := []*model.Metrics{
+			{ID: "batchGauge", MType: "gauge", Value: ptrFloat64(3.14)},
+			{ID: "batchCounter", MType: "counter", Delta: ptrInt64(42)},
+		}
+
+		jsonData, err := json.Marshal(metrics)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(jsonData); err != nil {
+			t.Fatal(err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(buf.Bytes()))
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
 		}
 	})
 }

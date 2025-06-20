@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/model"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -223,6 +224,48 @@ func (p *PostgresStore) GetAll() (map[string]float64, map[string]int64, error) {
 	}
 
 	return gauges, counters, nil
+}
+
+func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	ctx := context.Background()
+	if err := p.ensureConnected(ctx); err != nil {
+		return err
+	}
+
+	tx, err := p.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for _, m := range metrics {
+		switch m.MType {
+		case "gauge":
+			_, err = tx.Exec(`
+				INSERT INTO metrics (id, mtype, value) 
+				VALUES ($1, $2, $3) 
+				ON CONFLICT (id) DO UPDATE SET value = $3
+			`, m.ID, m.MType, m.Value)
+		case "counter":
+			_, err = tx.Exec(`
+				INSERT INTO metrics (id, mtype, delta) 
+				VALUES ($1, $2, $3) 
+				ON CONFLICT (id) DO UPDATE SET delta = metrics.delta + $3
+			`, m.ID, m.MType, m.Delta)
+		default:
+			return fmt.Errorf("unsupported metric type: %s", m.MType)
+		}
+		if err != nil {
+			return fmt.Errorf("exec update for %s: %w", m.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }
 
 func (p *PostgresStore) Ping(ctx context.Context) error {

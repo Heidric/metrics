@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/cfg"
+	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
+	"github.com/rs/zerolog"
 )
 
 type Metric struct {
@@ -141,6 +143,108 @@ func (a *Agent) pollMetrics() {
 	}
 }
 
+func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	data, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metrics: %w", err)
+	}
+
+	compressed, err := a.compressData(data)
+	if err != nil {
+		return fmt.Errorf("failed to compress data: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, a.serverURL+"/updates/", bytes.NewReader(compressed))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func (a *Agent) prepareMetricsForBatch() []*model.Metrics {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	var batch []*model.Metrics
+	for _, m := range a.metrics {
+		switch m.Type {
+		case "gauge":
+			v, err := strconv.ParseFloat(m.Value, 64)
+			if err != nil {
+				continue
+			}
+			batch = append(batch, &model.Metrics{
+				ID:    m.Name,
+				MType: "gauge",
+				Value: &v,
+			})
+		case "counter":
+			d, err := strconv.ParseInt(m.Value, 10, 64)
+			if err != nil {
+				continue
+			}
+			batch = append(batch, &model.Metrics{
+				ID:    m.Name,
+				MType: "counter",
+				Delta: &d,
+			})
+		}
+	}
+	return batch
+}
+
+func (a *Agent) sendMetricsIndividually(metrics []*model.Metrics) {
+	for _, m := range metrics {
+		data, err := json.Marshal(m)
+		if err != nil {
+			logger.Log.Error().Msgf("Failed to marshal metric %s: %v", m.ID, err)
+			continue
+		}
+
+		compressed, err := a.compressData(data)
+		if err != nil {
+			logger.Log.Error().Msgf("Failed to compress metric %s: %v", m.ID, err)
+			continue
+		}
+
+		req, err := http.NewRequest(http.MethodPost, a.serverURL+"/update/", bytes.NewReader(compressed))
+		if err != nil {
+			logger.Log.Error().Msgf("Failed to create request for metric %s: %v", m.ID, err)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+
+		resp, err := a.client.Do(req)
+		if err != nil {
+			logger.Log.Error().Msgf("Failed to send metric %s: %v", m.ID, err)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			logger.Log.Error().Msgf("Server returned %s for metric %s", resp.Status, m.ID)
+		}
+	}
+}
+
 func (a *Agent) reportMetrics() {
 	ticker := time.NewTicker(a.reportInterval)
 	defer ticker.Stop()
@@ -156,56 +260,17 @@ func (a *Agent) reportMetrics() {
 				Type:  "counter",
 				Value: fmt.Sprintf("%d", delta),
 			}
-			allMetrics := append(a.metrics, pollCountMetric)
+			a.metrics = append(a.metrics, pollCountMetric)
 			a.mu.Unlock()
 
-			for _, metric := range allMetrics {
-				var m model.Metrics
-				var body []byte
-				var err error
+			batch := a.prepareMetricsForBatch()
+			err := a.sendMetricsBatch(batch)
 
-				if metric.Type == "counter" {
-					delta, _ := strconv.ParseInt(metric.Value, 10, 64)
-					m = model.Metrics{
-						ID:    metric.Name,
-						MType: metric.Type,
-						Delta: &delta,
-					}
-					body, err = json.Marshal(m)
-				} else {
-					value, _ := strconv.ParseFloat(metric.Value, 64)
-					m = model.Metrics{
-						ID:    metric.Name,
-						MType: metric.Type,
-						Value: &value,
-					}
-					body, err = json.Marshal(m)
-				}
-
-				if err != nil {
-					continue
-				}
-
-				compressedBody, err := a.compressData(body)
-				if err != nil {
-					continue
-				}
-
-				url := a.serverURL + "/update/"
-				req, err := http.NewRequest("POST", url, bytes.NewReader(compressedBody))
-				if err != nil {
-					continue
-				}
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("Content-Encoding", "gzip")
-				req.Header.Set("Accept-Encoding", "gzip")
-
-				resp, err := a.client.Do(req)
-				if err != nil {
-					continue
-				}
-				resp.Body.Close()
+			if err != nil {
+				logger.Log.Error().Msgf("Batch failed: %v. Sending metrics one by one...", err)
+				a.sendMetricsIndividually(batch)
 			}
+
 		case <-a.stopChan:
 			return
 		}
@@ -213,6 +278,9 @@ func (a *Agent) reportMetrics() {
 }
 
 func main() {
+	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	logger.Log = &log
+
 	serverAddr, pollInterval, reportInterval := parseFlags()
 
 	agent := NewAgent(serverAddr, pollInterval, reportInterval)

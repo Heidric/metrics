@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/model"
 )
 
 type MetricsStorage interface {
@@ -17,6 +18,7 @@ type MetricsStorage interface {
 	SetCounter(name string, value int64) error
 	GetCounter(name string) (int64, error)
 	GetAll() (map[string]float64, map[string]int64, error)
+	UpdateMetricsBatch(metrics []*model.Metrics) error
 	Ping(ctx context.Context) error
 	Close() error
 }
@@ -217,6 +219,29 @@ func (s *Store) LoadFromFile() error {
 	s.gauges = data.Gauges
 	s.counters = data.Counters
 
+	return nil
+}
+
+func (s *Store) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, m := range metrics {
+		switch m.MType {
+		case "gauge":
+			if m.Value == nil {
+				continue
+			}
+			s.gauges[m.ID] = *m.Value
+		case "counter":
+			if m.Delta == nil {
+				continue
+			}
+			s.counters[m.ID] += *m.Delta
+		default:
+			return fmt.Errorf("unsupported metric type: %s", m.MType)
+		}
+	}
 	return nil
 }
 

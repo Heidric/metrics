@@ -116,6 +116,32 @@ func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
 	}
 }
 
+func (m *MetricsService) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	var valid []*model.Metrics
+	for _, metric := range metrics {
+		if metric == nil || metric.ID == "" || metric.MType == "" {
+			continue
+		}
+		switch metric.MType {
+		case "gauge":
+			if metric.Value == nil {
+				continue
+			}
+		case "counter":
+			if metric.Delta == nil {
+				continue
+			}
+		default:
+			continue
+		}
+		valid = append(valid, metric)
+	}
+	if len(valid) == 0 {
+		return nil
+	}
+	return m.storage.UpdateMetricsBatch(valid)
+}
+
 func (m *MetricsService) Ping(ctx context.Context) error {
 	return m.storage.Ping(ctx)
 }
