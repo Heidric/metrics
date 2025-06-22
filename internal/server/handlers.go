@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -135,6 +138,16 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("failed to read request body: %v", err)
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("RAW BODY: %s", string(bodyBytes))
+
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
 	defer r.Body.Close()
 
 	var metrics []*model.Metrics
@@ -142,9 +155,11 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to decode metrics", http.StatusBadRequest)
 		return
 	}
+	log.Printf("DECODED METRICS: %+v", metrics)
 
 	if err := s.metrics.UpdateMetricsBatch(metrics); err != nil {
 		http.Error(w, "batch update failed", http.StatusBadRequest)
+		log.Printf("BATCH UPDATE ERROR: %v", err)
 		return
 	}
 

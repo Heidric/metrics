@@ -244,20 +244,21 @@ func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
 		switch m.MType {
 		case "gauge":
 			_, err = tx.Exec(`
-				INSERT INTO metrics (id, mtype, value) 
+				INSERT INTO metrics (name, mtype, value) 
 				VALUES ($1, $2, $3) 
-				ON CONFLICT (id) DO UPDATE SET value = $3
+				ON CONFLICT (name, mtype) DO UPDATE SET value = $3
 			`, m.ID, m.MType, m.Value)
 		case "counter":
 			_, err = tx.Exec(`
-				INSERT INTO metrics (id, mtype, delta) 
+				INSERT INTO metrics (name, mtype, delta) 
 				VALUES ($1, $2, $3) 
-				ON CONFLICT (id) DO UPDATE SET delta = metrics.delta + $3
+				ON CONFLICT (name, mtype) DO UPDATE SET delta = metrics.delta + $3
 			`, m.ID, m.MType, m.Delta)
 		default:
 			return fmt.Errorf("unsupported metric type: %s", m.MType)
 		}
 		if err != nil {
+			log.Printf("UpdateMetricsBatch SQL error for ID=%s: %v", m.ID, err)
 			return fmt.Errorf("exec update for %s: %w", m.ID, err)
 		}
 	}
