@@ -144,8 +144,6 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	log.Printf("RAW BODY: %s", string(bodyBytes))
-
 	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	defer r.Body.Close()
@@ -155,8 +153,6 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to decode metrics", http.StatusBadRequest)
 		return
 	}
-	log.Printf("DECODED METRICS: %+v", metrics)
-
 	if err := s.metrics.UpdateMetricsBatch(metrics); err != nil {
 		http.Error(w, "batch update failed", http.StatusBadRequest)
 		log.Printf("BATCH UPDATE ERROR: %v", err)
