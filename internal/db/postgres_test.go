@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +78,7 @@ func TestPostgresStore_GetGauge(t *testing.T) {
 			WillReturnError(sql.ErrNoRows)
 
 		_, err := store.GetGauge("cpu")
-		assert.ErrorIs(t, err, errors.ErrKeyNotFound)
+		assert.ErrorIs(t, err, customerrors.ErrKeyNotFound)
 	})
 
 	t.Run("Database error", func(t *testing.T) {
@@ -164,7 +164,7 @@ func TestPostgresStore_GetCounter(t *testing.T) {
 			WillReturnError(sql.ErrNoRows)
 
 		_, err := store.GetCounter("requests")
-		assert.ErrorIs(t, err, errors.ErrKeyNotFound)
+		assert.ErrorIs(t, err, customerrors.ErrKeyNotFound)
 	})
 
 	require.NoError(t, mock.ExpectationsWereMet())

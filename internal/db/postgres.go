@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Heidric/metrics.git/internal/errors"
-	"github.com/Heidric/metrics.git/internal/model"
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/Heidric/metrics.git/internal/customerrors"
+	"github.com/Heidric/metrics.git/internal/model"
 )
 
 type PostgresStore struct {
@@ -23,9 +24,7 @@ type PostgresStore struct {
 }
 
 func NewPostgresStore(dsn string) *PostgresStore {
-	return &PostgresStore{
-		dsn: dsn,
-	}
+	return &PostgresStore{dsn: dsn}
 }
 
 func (p *PostgresStore) resetConnection() {
@@ -46,7 +45,6 @@ func (p *PostgresStore) resetConnection() {
 
 func (p *PostgresStore) handleConnectionError(err error) {
 	log.Printf("Handling connection error: %v", err)
-
 	p.resetConnection()
 }
 
@@ -62,7 +60,7 @@ func (p *PostgresStore) ensureConnected(ctx context.Context) error {
 	}
 
 	if p.dsn == "" {
-		return errors.ErrNotConnected
+		return customerrors.ErrNotConnected
 	}
 
 	log.Println("Opening new database connection")
@@ -109,31 +107,87 @@ func (p *PostgresStore) createTable(db *sql.DB) error {
 
 func (p *PostgresStore) SetGauge(name string, value float64) error {
 	ctx := context.Background()
-
-	if err := p.ensureConnected(ctx); err != nil {
-		log.Printf("ensureConnected error: %v", err)
-		return err
-	}
-
-	query := `
-        INSERT INTO metrics (name, mtype, value)
-        VALUES ($1, 'gauge', $2)
-        ON CONFLICT (name, mtype) DO UPDATE SET value = $2
-    `
-
-	_, err := p.db.ExecContext(ctx, query, name, value)
-
-	if err != nil {
-		log.Printf("Query error: %v", err)
-
-		if err == sql.ErrConnDone ||
-			err == sql.ErrTxDone ||
-			strings.Contains(strings.ToLower(err.Error()), "connection") {
-			log.Println("Detected connection error, resetting...")
-			p.resetConnection()
+	return withPGRetry(func() error {
+		if err := p.ensureConnected(ctx); err != nil {
+			log.Printf("ensureConnected error: %v", err)
+			return err
 		}
-	}
-	return err
+
+		query := `
+	        INSERT INTO metrics (name, mtype, value)
+	        VALUES ($1, 'gauge', $2)
+	        ON CONFLICT (name, mtype) DO UPDATE SET value = $2
+	    `
+		_, err := p.db.ExecContext(ctx, query, name, value)
+		if err != nil {
+			log.Printf("Query error: %v", err)
+			if err == sql.ErrConnDone || err == sql.ErrTxDone || strings.Contains(strings.ToLower(err.Error()), "connection") {
+				log.Println("Detected connection error, resetting...")
+				p.resetConnection()
+			}
+		}
+		return err
+	})
+}
+
+func (p *PostgresStore) SetCounter(name string, value int64) error {
+	ctx := context.Background()
+	return withPGRetry(func() error {
+		if err := p.ensureConnected(ctx); err != nil {
+			return err
+		}
+
+		query := `
+	        INSERT INTO metrics (name, mtype, delta)
+	        VALUES ($1, 'counter', $2)
+	        ON CONFLICT (name, mtype) DO UPDATE SET delta = metrics.delta + $2
+	    `
+		_, err := p.db.ExecContext(ctx, query, name, value)
+		return err
+	})
+}
+
+func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	ctx := context.Background()
+	return withPGRetry(func() error {
+		if err := p.ensureConnected(ctx); err != nil {
+			return err
+		}
+
+		tx, err := p.db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		for _, m := range metrics {
+			switch m.MType {
+			case "gauge":
+				_, err = tx.Exec(`
+					INSERT INTO metrics (name, mtype, value)
+					VALUES ($1, $2, $3) 
+					ON CONFLICT (name, mtype) DO UPDATE SET value = $3
+				`, m.ID, m.MType, m.Value)
+			case "counter":
+				_, err = tx.Exec(`
+					INSERT INTO metrics (name, mtype, delta)
+					VALUES ($1, $2, $3) 
+					ON CONFLICT (name, mtype) DO UPDATE SET delta = metrics.delta + $3
+				`, m.ID, m.MType, m.Delta)
+			default:
+				return fmt.Errorf("unsupported metric type: %s", m.MType)
+			}
+			if err != nil {
+				log.Printf("UpdateMetricsBatch SQL error for ID=%s: %v", m.ID, err)
+				return fmt.Errorf("exec update for %s: %w", m.ID, err)
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit transaction: %w", err)
+		}
+		return nil
+	})
 }
 
 func (p *PostgresStore) GetGauge(name string) (float64, error) {
@@ -146,24 +200,9 @@ func (p *PostgresStore) GetGauge(name string) (float64, error) {
 	query := "SELECT value FROM metrics WHERE name = $1 AND mtype = 'gauge'"
 	err := p.db.QueryRowContext(ctx, query, name).Scan(&value)
 	if err == sql.ErrNoRows {
-		return 0, errors.ErrKeyNotFound
+		return 0, customerrors.ErrKeyNotFound
 	}
 	return value, err
-}
-
-func (p *PostgresStore) SetCounter(name string, value int64) error {
-	ctx := context.Background()
-	if err := p.ensureConnected(ctx); err != nil {
-		return err
-	}
-
-	query := `
-        INSERT INTO metrics (name, mtype, delta)
-        VALUES ($1, 'counter', $2)
-        ON CONFLICT (name, mtype) DO UPDATE SET delta = metrics.delta + $2
-    `
-	_, err := p.db.ExecContext(ctx, query, name, value)
-	return err
 }
 
 func (p *PostgresStore) GetCounter(name string) (int64, error) {
@@ -176,7 +215,7 @@ func (p *PostgresStore) GetCounter(name string) (int64, error) {
 	query := "SELECT delta FROM metrics WHERE name = $1 AND mtype = 'counter'"
 	err := p.db.QueryRowContext(ctx, query, name).Scan(&delta)
 	if err == sql.ErrNoRows {
-		return 0, errors.ErrKeyNotFound
+		return 0, customerrors.ErrKeyNotFound
 	}
 	return delta, err
 }
@@ -226,59 +265,16 @@ func (p *PostgresStore) GetAll() (map[string]float64, map[string]int64, error) {
 	return gauges, counters, nil
 }
 
-func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
-	ctx := context.Background()
-	if err := p.ensureConnected(ctx); err != nil {
-		return err
-	}
-
-	tx, err := p.db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	for _, m := range metrics {
-		switch m.MType {
-		case "gauge":
-			_, err = tx.Exec(`
-				INSERT INTO metrics (name, mtype, value) 
-				VALUES ($1, $2, $3) 
-				ON CONFLICT (name, mtype) DO UPDATE SET value = $3
-			`, m.ID, m.MType, m.Value)
-		case "counter":
-			_, err = tx.Exec(`
-				INSERT INTO metrics (name, mtype, delta) 
-				VALUES ($1, $2, $3) 
-				ON CONFLICT (name, mtype) DO UPDATE SET delta = metrics.delta + $3
-			`, m.ID, m.MType, m.Delta)
-		default:
-			return fmt.Errorf("unsupported metric type: %s", m.MType)
-		}
-		if err != nil {
-			log.Printf("UpdateMetricsBatch SQL error for ID=%s: %v", m.ID, err)
-			return fmt.Errorf("exec update for %s: %w", m.ID, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
-}
-
 func (p *PostgresStore) Ping(ctx context.Context) error {
 	if err := p.ensureConnected(ctx); err != nil {
-		return errors.ErrNotConnected
+		return customerrors.ErrNotConnected
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if !p.connected {
-		return errors.ErrNotConnected
+		return customerrors.ErrNotConnected
 	}
 	return p.db.PingContext(ctx)
 }

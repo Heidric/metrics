@@ -13,7 +13,7 @@ import (
 
 var Log *zerolog.Logger
 
-func IniInitialize(config *log.Config) (*log.Logger, error) {
+func Initialize(config *log.Config) (*log.Logger, error) {
 	logger, err := log.NewLogger(context.Background(), config)
 	if err != nil {
 		return nil, errors.Wrap(err, "new logger")

@@ -72,7 +72,7 @@ func main() {
 		log.Fatal(err, "Load config")
 	}
 
-	logger, err := logger.IniInitialize(config.Logger)
+	logger, err := logger.Initialize(config.Logger)
 	if err != nil {
 		log.Fatal(err, "Init logger")
 	}

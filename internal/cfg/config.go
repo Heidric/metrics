@@ -21,7 +21,7 @@ type Config struct {
 }
 
 func NewConfig() (*Config, error) {
-	_ = godotenv.Load()
+	godotenv.Load()
 
 	config := &Config{
 		Logger: &log.Config{},

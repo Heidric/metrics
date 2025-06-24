@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -64,7 +64,7 @@ func TestStore(t *testing.T) {
 		defer store.Close()
 
 		_, err := store.GetGauge("nonexistent")
-		assert.ErrorIs(t, err, errors.ErrKeyNotFound)
+		assert.ErrorIs(t, err, customerrors.ErrKeyNotFound)
 	})
 
 	t.Run("Get non-existent Counter", func(t *testing.T) {
@@ -72,7 +72,7 @@ func TestStore(t *testing.T) {
 		defer store.Close()
 
 		_, err := store.GetCounter("nonexistent")
-		assert.ErrorIs(t, err, errors.ErrKeyNotFound)
+		assert.ErrorIs(t, err, customerrors.ErrKeyNotFound)
 	})
 
 	t.Run("GetAll", func(t *testing.T) {

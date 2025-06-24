@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,7 +24,7 @@ func (m *mockStorage) SetGauge(name string, value float64) error {
 func (m *mockStorage) GetGauge(name string) (float64, error) {
 	val, ok := m.gauges[name]
 	if !ok {
-		return 0, errors.ErrKeyNotFound
+		return 0, customerrors.ErrKeyNotFound
 	}
 	return val, nil
 }
@@ -42,7 +42,7 @@ func (m *mockStorage) SetCounter(name string, value int64) error {
 func (m *mockStorage) GetCounter(name string) (int64, error) {
 	val, ok := m.counters[name]
 	if !ok {
-		return 0, errors.ErrKeyNotFound
+		return 0, customerrors.ErrKeyNotFound
 	}
 	return val, nil
 }

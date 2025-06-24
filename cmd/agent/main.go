@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -58,6 +60,30 @@ func parseFlags() (string, time.Duration, time.Duration) {
 	}
 
 	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second
+}
+
+func isRetriableHTTP(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func withRetryHTTP(client *http.Client, req *http.Request) (*http.Response, error) {
+	delays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+	var lastErr error
+	for i, delay := range delays {
+		resp, err := client.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		if !isRetriableHTTP(err) {
+			return nil, err
+		}
+		lastErr = err
+		if i < len(delays)-1 {
+			time.Sleep(delay)
+		}
+	}
+	return nil, fmt.Errorf("HTTP request failed after retries: %w", lastErr)
 }
 
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
@@ -165,7 +191,7 @@ func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 
-	resp, err := a.client.Do(req)
+	resp, err := withRetryHTTP(http.DefaultClient, req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -232,7 +258,7 @@ func (a *Agent) sendMetricsIndividually(metrics []*model.Metrics) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
 
-		resp, err := a.client.Do(req)
+		resp, err := withRetryHTTP(http.DefaultClient, req)
 		if err != nil {
 			logger.Log.Error().Msgf("Failed to send metric %s: %v", m.ID, err)
 			continue

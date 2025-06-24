@@ -3,13 +3,14 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 
-	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/go-chi/chi"
 )
@@ -20,11 +21,11 @@ func (s *Server) getMetricHandler(w http.ResponseWriter, r *http.Request) {
 
 	metric, err := s.metrics.GetMetric(metricType, metricName)
 	if err != nil {
-		if err == errors.ErrKeyNotFound {
-			errors.NotFoundError(w)
+		if err == customerrors.ErrKeyNotFound {
+			customerrors.WriteError(w, http.StatusNotFound, "")
 			return
 		}
-		errors.InternalError(w)
+		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
 
@@ -39,7 +40,7 @@ func (s *Server) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 	value := chi.URLParam(r, "metricValue")
 
 	if strings.TrimSpace(name) == "" {
-		errors.NotFoundError(w)
+		customerrors.WriteError(w, http.StatusNotFound, "")
 		return
 	}
 
@@ -50,16 +51,16 @@ func (s *Server) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 	case "counter":
 		err = s.metrics.UpdateCounter(name, value)
 	default:
-		errors.ValidationError(w, "Invalid metric type")
+		customerrors.WriteError(w, http.StatusBadRequest, "Invalid metric type")
 		return
 	}
 
 	if err != nil {
-		if err == errors.ErrInvalidValue {
-			errors.ValidationError(w, err.Error())
+		if err == customerrors.ErrInvalidValue {
+			customerrors.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		errors.InternalError(w)
+		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
 
@@ -86,24 +87,25 @@ func (s *Server) listMetricsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	errors.NotFoundError(w)
+	customerrors.WriteError(w, http.StatusNotFound, "")
 }
 
 func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 	var metric model.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
-		errors.ValidationError(w, "Invalid JSON format")
+		customerrors.WriteError(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
 
 	if err := s.metrics.UpdateMetricJSON(&metric); err != nil {
-		switch err {
-		case errors.ErrInvalidType, errors.ErrInvalidValue:
-			errors.ValidationError(w, err.Error())
-		case errors.ErrKeyNotFound:
-			errors.NotFoundError(w)
+		switch {
+		case errors.Is(err, customerrors.ErrInvalidType),
+			errors.Is(err, customerrors.ErrInvalidValue):
+			customerrors.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, customerrors.ErrKeyNotFound):
+			customerrors.WriteError(w, http.StatusNotFound, "")
 		default:
-			errors.InternalError(w)
+			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
 	}
@@ -116,18 +118,18 @@ func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request)
 func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 	var metric model.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
-		errors.ValidationError(w, "Invalid JSON format")
+		customerrors.WriteError(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
 
 	if err := s.metrics.GetMetricJSON(&metric); err != nil {
-		switch err {
-		case errors.ErrInvalidType:
-			errors.ValidationError(w, err.Error())
-		case errors.ErrKeyNotFound:
-			errors.NotFoundError(w)
+		switch {
+		case errors.Is(err, customerrors.ErrInvalidType):
+			customerrors.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, customerrors.ErrKeyNotFound):
+			customerrors.WriteError(w, http.StatusNotFound, "")
 		default:
-			errors.InternalError(w)
+			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
 	}
@@ -144,8 +146,6 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	log.Printf("RAW BODY: %s", string(bodyBytes))
-
 	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	defer r.Body.Close()
@@ -155,11 +155,8 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to decode metrics", http.StatusBadRequest)
 		return
 	}
-	log.Printf("DECODED METRICS: %+v", metrics)
-
 	if err := s.metrics.UpdateMetricsBatch(metrics); err != nil {
 		http.Error(w, "batch update failed", http.StatusBadRequest)
-		log.Printf("BATCH UPDATE ERROR: %v", err)
 		return
 	}
 
@@ -168,7 +165,7 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) pingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := s.metrics.Ping(r.Context()); err != nil {
-		errors.InternalError(w)
+		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
 	w.WriteHeader(http.StatusOK)

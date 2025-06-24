@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/db"
-	"github.com/Heidric/metrics.git/internal/errors"
 	"github.com/Heidric/metrics.git/internal/model"
 )
 
@@ -48,14 +48,14 @@ func (m *MetricsService) GetMetric(metricType, metricName string) (string, error
 		}
 		return strconv.FormatInt(val, 10), nil
 	default:
-		return "", errors.ErrInvalidType
+		return "", customerrors.ErrInvalidType
 	}
 }
 
 func (m *MetricsService) UpdateGauge(name, value string) error {
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return errors.ErrInvalidValue
+		return customerrors.ErrInvalidValue
 	}
 	return m.storage.SetGauge(name, val)
 }
@@ -63,35 +63,35 @@ func (m *MetricsService) UpdateGauge(name, value string) error {
 func (m *MetricsService) UpdateCounter(name, value string) error {
 	delta, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
-		return errors.ErrInvalidValue
+		return customerrors.ErrInvalidValue
 	}
 	return m.storage.SetCounter(name, delta)
 }
 
 func (m *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
 	if metric == nil {
-		return errors.ErrInvalidValue
+		return customerrors.ErrInvalidValue
 	}
 
 	switch metric.MType {
 	case "gauge":
 		if metric.Value == nil {
-			return errors.ErrInvalidValue
+			return customerrors.ErrInvalidValue
 		}
 		return m.storage.SetGauge(metric.ID, *metric.Value)
 	case "counter":
 		if metric.Delta == nil {
-			return errors.ErrInvalidValue
+			return customerrors.ErrInvalidValue
 		}
 		return m.storage.SetCounter(metric.ID, *metric.Delta)
 	default:
-		return errors.ErrInvalidType
+		return customerrors.ErrInvalidType
 	}
 }
 
 func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
 	if metric == nil {
-		return errors.ErrInvalidValue
+		return customerrors.ErrInvalidValue
 	}
 
 	switch metric.MType {
@@ -112,7 +112,7 @@ func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
 		metric.Value = nil
 		return nil
 	default:
-		return errors.ErrInvalidType
+		return customerrors.ErrInvalidType
 	}
 }
 

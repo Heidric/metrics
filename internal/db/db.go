@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/model"
 )
 
@@ -96,7 +96,7 @@ func (s *Store) GetGauge(name string) (float64, error) {
 	if value, exists := s.gauges[name]; exists {
 		return value, nil
 	}
-	return 0, errors.ErrKeyNotFound
+	return 0, customerrors.ErrKeyNotFound
 }
 
 func (s *Store) SetCounter(name string, value int64) error {
@@ -124,7 +124,7 @@ func (s *Store) GetCounter(name string) (int64, error) {
 	if value, exists := s.counters[name]; exists {
 		return value, nil
 	}
-	return 0, errors.ErrKeyNotFound
+	return 0, customerrors.ErrKeyNotFound
 }
 
 func (s *Store) GetAll() (map[string]float64, map[string]int64, error) {

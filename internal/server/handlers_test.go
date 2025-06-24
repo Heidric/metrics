@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Heidric/metrics.git/internal/errors"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/go-chi/chi"
@@ -194,18 +194,13 @@ func TestHandlers(t *testing.T) {
 	t.Run("UpdateMetricJSON invalid type", func(t *testing.T) {
 		mock := &mockMetrics{
 			updateMetricJSONFn: func(metric *model.Metrics) error {
-				return errors.ErrInvalidType
+				return customerrors.ErrInvalidType
 			},
 		}
-
 		srv := NewServer(":8080", mock)
 		r := srv.Srv.Handler.(*chi.Mux)
 
-		metric := model.Metrics{
-			ID:    "invalid",
-			MType: "unknown",
-		}
-
+		metric := model.Metrics{ID: "invalid", MType: "unknown"}
 		body, _ := json.Marshal(metric)
 		req := httptest.NewRequest("POST", "/update/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -216,14 +211,12 @@ func TestHandlers(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected status 400, got %d", w.Code)
 		}
-
-		var response errors.CommonError
+		var response customerrors.CommonError
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Fatal("failed to unmarshal error response")
 		}
-
-		if response.Title != "Validation error occurred" {
-			t.Error("unexpected error response")
+		if response.Title != "Validation Error" {
+			t.Errorf("unexpected error title: got %q, want %q", response.Title, "Validation Error")
 		}
 	})
 
@@ -270,18 +263,13 @@ func TestHandlers(t *testing.T) {
 	t.Run("GetMetricJSON not found", func(t *testing.T) {
 		mock := &mockMetrics{
 			getMetricJSONFn: func(metric *model.Metrics) error {
-				return errors.ErrKeyNotFound
+				return customerrors.ErrKeyNotFound
 			},
 		}
-
 		srv := NewServer(":8080", mock)
 		r := srv.Srv.Handler.(*chi.Mux)
 
-		metric := model.Metrics{
-			ID:    "missing",
-			MType: "gauge",
-		}
-
+		metric := model.Metrics{ID: "missing", MType: "gauge"}
 		body, _ := json.Marshal(metric)
 		req := httptest.NewRequest("POST", "/value/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -292,14 +280,12 @@ func TestHandlers(t *testing.T) {
 		if w.Code != http.StatusNotFound {
 			t.Errorf("expected status 404, got %d", w.Code)
 		}
-
-		var response errors.CommonError
+		var response customerrors.CommonError
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Fatal("failed to unmarshal error response")
 		}
-
-		if response.Title != "Not found" {
-			t.Error("unexpected error response")
+		if response.Title != "Not Found" {
+			t.Errorf("unexpected error title: got %q, want %q", response.Title, "Not Found")
 		}
 	})
 
