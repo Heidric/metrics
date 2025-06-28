@@ -126,7 +126,7 @@ func TestHandlers(t *testing.T) {
 
 		metric := model.Metrics{
 			ID:    "temp",
-			MType: "gauge",
+			MType: model.GaugeType,
 			Value: new(float64),
 		}
 		*metric.Value = 42.5
@@ -164,8 +164,8 @@ func TestHandlers(t *testing.T) {
 		r := srv.Srv.Handler.(*chi.Mux)
 
 		metric := model.Metrics{
-			ID:    "counter",
-			MType: "counter",
+			ID:    model.CounterType,
+			MType: model.CounterType,
 			Delta: new(int64),
 		}
 		*metric.Delta = 5
@@ -186,7 +186,7 @@ func TestHandlers(t *testing.T) {
 			t.Fatal("failed to unmarshal response")
 		}
 
-		if response.ID != "counter" || *response.Delta != 10 {
+		if response.ID != model.CounterType || *response.Delta != 10 {
 			t.Error("response doesn't match expected value")
 		}
 	})
@@ -223,7 +223,7 @@ func TestHandlers(t *testing.T) {
 	t.Run("GetMetricJSON success", func(t *testing.T) {
 		mock := &mockMetrics{
 			getMetricJSONFn: func(metric *model.Metrics) error {
-				if metric.MType == "gauge" {
+				if metric.MType == model.GaugeType {
 					value := 99.9
 					metric.Value = &value
 				}
@@ -236,7 +236,7 @@ func TestHandlers(t *testing.T) {
 
 		metric := model.Metrics{
 			ID:    "test",
-			MType: "gauge",
+			MType: model.GaugeType,
 		}
 
 		body, _ := json.Marshal(metric)
@@ -269,7 +269,7 @@ func TestHandlers(t *testing.T) {
 		srv := NewServer(":8080", mock)
 		r := srv.Srv.Handler.(*chi.Mux)
 
-		metric := model.Metrics{ID: "missing", MType: "gauge"}
+		metric := model.Metrics{ID: "missing", MType: model.GaugeType}
 		body, _ := json.Marshal(metric)
 		req := httptest.NewRequest("POST", "/value/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -303,8 +303,8 @@ func TestHandlers(t *testing.T) {
 		r := srv.Srv.Handler.(*chi.Mux)
 
 		metrics := []*model.Metrics{
-			{ID: "batchGauge", MType: "gauge", Value: ptrFloat64(3.14)},
-			{ID: "batchCounter", MType: "counter", Delta: ptrInt64(42)},
+			{ID: "batchGauge", MType: model.GaugeType, Value: ptrFloat64(3.14)},
+			{ID: "batchCounter", MType: model.CounterType, Delta: ptrInt64(42)},
 		}
 
 		jsonData, err := json.Marshal(metrics)

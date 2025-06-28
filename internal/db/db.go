@@ -228,12 +228,12 @@ func (s *Store) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics
 
 	for _, m := range metrics {
 		switch m.MType {
-		case "gauge":
+		case model.GaugeType:
 			if m.Value == nil {
 				continue
 			}
 			s.gauges[m.ID] = *m.Value
-		case "counter":
+		case model.CounterType:
 			if m.Delta == nil {
 				continue
 			}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/customerrors"
+	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -107,14 +108,14 @@ func TestStore(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			go func() {
 				for j := 0; j < 100; j++ {
-					_ = store.SetCounter(ctx, "counter", 1)
+					_ = store.SetCounter(ctx, model.CounterType, 1)
 				}
 			}()
 		}
 
 		time.Sleep(500 * time.Millisecond)
 
-		val, err := store.GetCounter(ctx, "counter")
+		val, err := store.GetCounter(ctx, model.CounterType)
 		require.NoError(t, err)
 		assert.Equal(t, int64(200), val)
 	})

@@ -8,6 +8,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Heidric/metrics.git/internal/customerrors"
+	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -189,8 +190,8 @@ func TestPostgresStore_GetAll(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		ctx := context.Background()
 		rows := sqlmock.NewRows([]string{"name", "mtype", "value", "delta"}).
-			AddRow("cpu", "gauge", 42.5, nil).
-			AddRow("requests", "counter", nil, 15)
+			AddRow("cpu", model.GaugeType, 42.5, nil).
+			AddRow("requests", model.CounterType, nil, 15)
 
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT name, mtype, value, delta FROM metrics")).
 			WillReturnRows(rows)

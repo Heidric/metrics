@@ -103,7 +103,7 @@ func TestMetricsService(t *testing.T) {
 		}
 		service := NewMetricsService(storage)
 
-		val, err := service.GetMetric("gauge", "temp")
+		val, err := service.GetMetric(model.GaugeType, "temp")
 		require.NoError(t, err)
 		assert.Equal(t, "42.5", val)
 	})
@@ -115,7 +115,7 @@ func TestMetricsService(t *testing.T) {
 		}
 		service := NewMetricsService(storage)
 
-		val, err := service.GetMetric("counter", "hits")
+		val, err := service.GetMetric(model.CounterType, "hits")
 		require.NoError(t, err)
 		assert.Equal(t, "15", val)
 	})

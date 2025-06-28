@@ -46,9 +46,9 @@ func (s *Server) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	switch metricType {
-	case "gauge":
+	case model.GaugeType:
 		err = s.metrics.UpdateGauge(name, value)
-	case "counter":
+	case model.CounterType:
 		err = s.metrics.UpdateCounter(name, value)
 	default:
 		customerrors.WriteError(w, http.StatusBadRequest, "Invalid metric type")

@@ -28,9 +28,6 @@ func NewPostgresStore(dsn string) *PostgresStore {
 }
 
 func (p *PostgresStore) resetConnection() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	log.Println("Resetting connection")
 
 	if p.db != nil {
@@ -168,13 +165,13 @@ func (p *PostgresStore) UpdateMetricsBatch(ctx context.Context, metrics []*model
 
 		for _, m := range metrics {
 			switch m.MType {
-			case "gauge":
+			case model.GaugeType:
 				_, err = tx.ExecContext(ctx, `
 					INSERT INTO metrics (name, mtype, value)
 					VALUES ($1, $2, $3) 
 					ON CONFLICT (name, mtype) DO UPDATE SET value = $3
 				`, m.ID, m.MType, m.Value)
-			case "counter":
+			case model.CounterType:
 				_, err = tx.ExecContext(ctx, `
 					INSERT INTO metrics (name, mtype, delta)
 					VALUES ($1, $2, $3) 
@@ -259,11 +256,11 @@ func (p *PostgresStore) GetAll(ctx context.Context) (map[string]float64, map[str
 		}
 
 		switch mtype {
-		case "gauge":
+		case model.GaugeType:
 			if value.Valid {
 				gauges[name] = value.Float64
 			}
-		case "counter":
+		case model.CounterType:
 			if delta.Valid {
 				counters[name] = delta.Int64
 			}
