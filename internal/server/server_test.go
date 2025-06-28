@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 )
 
 func TestServerRoutes(t *testing.T) {
+	ctx := context.Background()
 	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
 	logger.Log = &testLogger
 
@@ -26,11 +28,11 @@ func TestServerRoutes(t *testing.T) {
 	storage := db.NewStore("", 0)
 	defer storage.Close()
 
-	err = storage.SetGauge("temp", 42.5)
+	err = storage.SetGauge(ctx, "temp", 42.5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = storage.SetCounter("requests", 10)
+	err = storage.SetCounter(ctx, "requests", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

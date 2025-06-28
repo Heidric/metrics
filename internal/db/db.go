@@ -13,12 +13,12 @@ import (
 )
 
 type MetricsStorage interface {
-	SetGauge(name string, value float64) error
-	GetGauge(name string) (float64, error)
-	SetCounter(name string, value int64) error
-	GetCounter(name string) (int64, error)
-	GetAll() (map[string]float64, map[string]int64, error)
-	UpdateMetricsBatch(metrics []*model.Metrics) error
+	SetGauge(ctx context.Context, name string, value float64) error
+	GetGauge(ctx context.Context, name string) (float64, error)
+	SetCounter(ctx context.Context, name string, value int64) error
+	GetCounter(ctx context.Context, name string) (int64, error)
+	GetAll(ctx context.Context) (map[string]float64, map[string]int64, error)
+	UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error
 	Ping(ctx context.Context) error
 	Close() error
 }
@@ -76,7 +76,7 @@ func (s *Store) periodicSave() {
 	}
 }
 
-func (s *Store) SetGauge(name string, value float64) error {
+func (s *Store) SetGauge(ctx context.Context, name string, value float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gauges[name] = value
@@ -89,7 +89,7 @@ func (s *Store) SetGauge(name string, value float64) error {
 	return nil
 }
 
-func (s *Store) GetGauge(name string) (float64, error) {
+func (s *Store) GetGauge(ctx context.Context, name string) (float64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -99,7 +99,7 @@ func (s *Store) GetGauge(name string) (float64, error) {
 	return 0, customerrors.ErrKeyNotFound
 }
 
-func (s *Store) SetCounter(name string, value int64) error {
+func (s *Store) SetCounter(ctx context.Context, name string, value int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -117,7 +117,7 @@ func (s *Store) SetCounter(name string, value int64) error {
 	return nil
 }
 
-func (s *Store) GetCounter(name string) (int64, error) {
+func (s *Store) GetCounter(ctx context.Context, name string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -127,7 +127,7 @@ func (s *Store) GetCounter(name string) (int64, error) {
 	return 0, customerrors.ErrKeyNotFound
 }
 
-func (s *Store) GetAll() (map[string]float64, map[string]int64, error) {
+func (s *Store) GetAll(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -222,7 +222,7 @@ func (s *Store) LoadFromFile() error {
 	return nil
 }
 
-func (s *Store) UpdateMetricsBatch(metrics []*model.Metrics) error {
+func (s *Store) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -18,8 +18,9 @@ func NewMetricsService(storage db.MetricsStorage) *MetricsService {
 }
 
 func (m *MetricsService) ListMetrics() map[string]string {
+	ctx := context.Background()
 	result := make(map[string]string)
-	gauges, counters, err := m.storage.GetAll()
+	gauges, counters, err := m.storage.GetAll(ctx)
 	if err != nil {
 		return result
 	}
@@ -34,15 +35,16 @@ func (m *MetricsService) ListMetrics() map[string]string {
 }
 
 func (m *MetricsService) GetMetric(metricType, metricName string) (string, error) {
+	ctx := context.Background()
 	switch metricType {
 	case "gauge":
-		val, err := m.storage.GetGauge(metricName)
+		val, err := m.storage.GetGauge(ctx, metricName)
 		if err != nil {
 			return "", err
 		}
 		return strconv.FormatFloat(val, 'f', -1, 64), nil
 	case "counter":
-		val, err := m.storage.GetCounter(metricName)
+		val, err := m.storage.GetCounter(ctx, metricName)
 		if err != nil {
 			return "", err
 		}
@@ -53,22 +55,25 @@ func (m *MetricsService) GetMetric(metricType, metricName string) (string, error
 }
 
 func (m *MetricsService) UpdateGauge(name, value string) error {
+	ctx := context.Background()
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return customerrors.ErrInvalidValue
 	}
-	return m.storage.SetGauge(name, val)
+	return m.storage.SetGauge(ctx, name, val)
 }
 
 func (m *MetricsService) UpdateCounter(name, value string) error {
+	ctx := context.Background()
 	delta, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return customerrors.ErrInvalidValue
 	}
-	return m.storage.SetCounter(name, delta)
+	return m.storage.SetCounter(ctx, name, delta)
 }
 
 func (m *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
+	ctx := context.Background()
 	if metric == nil {
 		return customerrors.ErrInvalidValue
 	}
@@ -78,25 +83,26 @@ func (m *MetricsService) UpdateMetricJSON(metric *model.Metrics) error {
 		if metric.Value == nil {
 			return customerrors.ErrInvalidValue
 		}
-		return m.storage.SetGauge(metric.ID, *metric.Value)
+		return m.storage.SetGauge(ctx, metric.ID, *metric.Value)
 	case "counter":
 		if metric.Delta == nil {
 			return customerrors.ErrInvalidValue
 		}
-		return m.storage.SetCounter(metric.ID, *metric.Delta)
+		return m.storage.SetCounter(ctx, metric.ID, *metric.Delta)
 	default:
 		return customerrors.ErrInvalidType
 	}
 }
 
 func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
+	ctx := context.Background()
 	if metric == nil {
 		return customerrors.ErrInvalidValue
 	}
 
 	switch metric.MType {
 	case "gauge":
-		value, err := m.storage.GetGauge(metric.ID)
+		value, err := m.storage.GetGauge(ctx, metric.ID)
 		if err != nil {
 			return err
 		}
@@ -104,7 +110,7 @@ func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
 		metric.Delta = nil
 		return nil
 	case "counter":
-		delta, err := m.storage.GetCounter(metric.ID)
+		delta, err := m.storage.GetCounter(ctx, metric.ID)
 		if err != nil {
 			return err
 		}
@@ -117,6 +123,7 @@ func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
 }
 
 func (m *MetricsService) UpdateMetricsBatch(metrics []*model.Metrics) error {
+	ctx := context.Background()
 	var valid []*model.Metrics
 	for _, metric := range metrics {
 		if metric == nil || metric.ID == "" || metric.MType == "" {
@@ -139,7 +146,7 @@ func (m *MetricsService) UpdateMetricsBatch(metrics []*model.Metrics) error {
 	if len(valid) == 0 {
 		return nil
 	}
-	return m.storage.UpdateMetricsBatch(valid)
+	return m.storage.UpdateMetricsBatch(ctx, valid)
 }
 
 func (m *MetricsService) Ping(ctx context.Context) error {

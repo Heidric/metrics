@@ -16,12 +16,12 @@ type mockStorage struct {
 	updateMetricsBatchFn func(metrics []*model.Metrics) error
 }
 
-func (m *mockStorage) SetGauge(name string, value float64) error {
+func (m *mockStorage) SetGauge(ctx context.Context, name string, value float64) error {
 	m.gauges[name] = value
 	return nil
 }
 
-func (m *mockStorage) GetGauge(name string) (float64, error) {
+func (m *mockStorage) GetGauge(ctx context.Context, name string) (float64, error) {
 	val, ok := m.gauges[name]
 	if !ok {
 		return 0, customerrors.ErrKeyNotFound
@@ -29,7 +29,7 @@ func (m *mockStorage) GetGauge(name string) (float64, error) {
 	return val, nil
 }
 
-func (m *mockStorage) SetCounter(name string, value int64) error {
+func (m *mockStorage) SetCounter(ctx context.Context, name string, value int64) error {
 	if m.counters == nil {
 		m.counters = make(map[string]int64)
 	}
@@ -39,7 +39,7 @@ func (m *mockStorage) SetCounter(name string, value int64) error {
 	return nil
 }
 
-func (m *mockStorage) GetCounter(name string) (int64, error) {
+func (m *mockStorage) GetCounter(ctx context.Context, name string) (int64, error) {
 	val, ok := m.counters[name]
 	if !ok {
 		return 0, customerrors.ErrKeyNotFound
@@ -47,11 +47,11 @@ func (m *mockStorage) GetCounter(name string) (int64, error) {
 	return val, nil
 }
 
-func (m *mockStorage) GetAll() (map[string]float64, map[string]int64, error) {
+func (m *mockStorage) GetAll(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	return m.gauges, m.counters, nil
 }
 
-func (m *mockStorage) UpdateMetricsBatch(metrics []*model.Metrics) error {
+func (m *mockStorage) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error {
 	if m.updateMetricsBatchFn != nil {
 		return m.updateMetricsBatchFn(metrics)
 	}

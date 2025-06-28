@@ -26,6 +26,7 @@ func TestPostgresStore_SetGauge(t *testing.T) {
 	store := &PostgresStore{db: db, connected: true}
 
 	t.Run("Success", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectExec(regexp.QuoteMeta(`
             INSERT INTO metrics (name, mtype, value)
             VALUES ($1, 'gauge', $2)
@@ -34,11 +35,12 @@ func TestPostgresStore_SetGauge(t *testing.T) {
 			WithArgs("cpu", 42.5).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
-		err := store.SetGauge("cpu", 42.5)
+		err := store.SetGauge(ctx, "cpu", 42.5)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Database error", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectExec(regexp.QuoteMeta(`
             INSERT INTO metrics (name, mtype, value)
             VALUES ($1, 'gauge', $2)
@@ -47,7 +49,7 @@ func TestPostgresStore_SetGauge(t *testing.T) {
 			WithArgs("cpu", 42.5).
 			WillReturnError(sql.ErrConnDone)
 
-		err := store.SetGauge("cpu", 42.5)
+		err := store.SetGauge(ctx, "cpu", 42.5)
 		assert.Error(t, err)
 	})
 
@@ -62,31 +64,34 @@ func TestPostgresStore_GetGauge(t *testing.T) {
 	store := &PostgresStore{db: db, connected: true}
 
 	t.Run("Success", func(t *testing.T) {
+		ctx := context.Background()
 		rows := sqlmock.NewRows([]string{"value"}).AddRow(42.5)
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT value FROM metrics WHERE name = $1 AND mtype = 'gauge'")).
 			WithArgs("cpu").
 			WillReturnRows(rows)
 
-		value, err := store.GetGauge("cpu")
+		value, err := store.GetGauge(ctx, "cpu")
 		require.NoError(t, err)
 		assert.Equal(t, 42.5, value)
 	})
 
 	t.Run("Not found", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT value FROM metrics WHERE name = $1 AND mtype = 'gauge'")).
 			WithArgs("cpu").
 			WillReturnError(sql.ErrNoRows)
 
-		_, err := store.GetGauge("cpu")
+		_, err := store.GetGauge(ctx, "cpu")
 		assert.ErrorIs(t, err, customerrors.ErrKeyNotFound)
 	})
 
 	t.Run("Database error", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT value FROM metrics WHERE name = $1 AND mtype = 'gauge'")).
 			WithArgs("cpu").
 			WillReturnError(sql.ErrTxDone)
 
-		_, err := store.GetGauge("cpu")
+		_, err := store.GetGauge(ctx, "cpu")
 		assert.Error(t, err)
 	})
 
@@ -101,6 +106,7 @@ func TestPostgresStore_SetCounter(t *testing.T) {
 	store := &PostgresStore{db: db, connected: true}
 
 	t.Run("Success", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectExec(regexp.QuoteMeta(`
             INSERT INTO metrics (name, mtype, delta)
             VALUES ($1, 'counter', $2)
@@ -109,11 +115,12 @@ func TestPostgresStore_SetCounter(t *testing.T) {
 			WithArgs("requests", int64(10)).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
-		err := store.SetCounter("requests", 10)
+		err := store.SetCounter(ctx, "requests", 10)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Increment", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectExec(regexp.QuoteMeta(`
             INSERT INTO metrics (name, mtype, delta)
             VALUES ($1, 'counter', $2)
@@ -130,10 +137,10 @@ func TestPostgresStore_SetCounter(t *testing.T) {
 			WithArgs("requests", int64(3)).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
-		err := store.SetCounter("requests", 5)
+		err := store.SetCounter(ctx, "requests", 5)
 		require.NoError(t, err)
 
-		err = store.SetCounter("requests", 3)
+		err = store.SetCounter(ctx, "requests", 3)
 		require.NoError(t, err)
 	})
 
@@ -148,22 +155,24 @@ func TestPostgresStore_GetCounter(t *testing.T) {
 	store := &PostgresStore{db: db, connected: true}
 
 	t.Run("Success", func(t *testing.T) {
+		ctx := context.Background()
 		rows := sqlmock.NewRows([]string{"delta"}).AddRow(15)
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT delta FROM metrics WHERE name = $1 AND mtype = 'counter'")).
 			WithArgs("requests").
 			WillReturnRows(rows)
 
-		value, err := store.GetCounter("requests")
+		value, err := store.GetCounter(ctx, "requests")
 		require.NoError(t, err)
 		assert.Equal(t, int64(15), value)
 	})
 
 	t.Run("Not found", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT delta FROM metrics WHERE name = $1 AND mtype = 'counter'")).
 			WithArgs("requests").
 			WillReturnError(sql.ErrNoRows)
 
-		_, err := store.GetCounter("requests")
+		_, err := store.GetCounter(ctx, "requests")
 		assert.ErrorIs(t, err, customerrors.ErrKeyNotFound)
 	})
 
@@ -178,6 +187,7 @@ func TestPostgresStore_GetAll(t *testing.T) {
 	store := &PostgresStore{db: db, connected: true}
 
 	t.Run("Success", func(t *testing.T) {
+		ctx := context.Background()
 		rows := sqlmock.NewRows([]string{"name", "mtype", "value", "delta"}).
 			AddRow("cpu", "gauge", 42.5, nil).
 			AddRow("requests", "counter", nil, 15)
@@ -185,7 +195,7 @@ func TestPostgresStore_GetAll(t *testing.T) {
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT name, mtype, value, delta FROM metrics")).
 			WillReturnRows(rows)
 
-		gauges, counters, err := store.GetAll()
+		gauges, counters, err := store.GetAll(ctx)
 		require.NoError(t, err)
 
 		assert.Equal(t, 42.5, gauges["cpu"])
@@ -193,11 +203,12 @@ func TestPostgresStore_GetAll(t *testing.T) {
 	})
 
 	t.Run("Empty result", func(t *testing.T) {
+		ctx := context.Background()
 		rows := sqlmock.NewRows([]string{"name", "mtype", "value", "delta"})
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT name, mtype, value, delta FROM metrics")).
 			WillReturnRows(rows)
 
-		gauges, counters, err := store.GetAll()
+		gauges, counters, err := store.GetAll(ctx)
 		require.NoError(t, err)
 
 		assert.Empty(t, gauges)
@@ -205,10 +216,11 @@ func TestPostgresStore_GetAll(t *testing.T) {
 	})
 
 	t.Run("Database error", func(t *testing.T) {
+		ctx := context.Background()
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT name, mtype, value, delta FROM metrics")).
 			WillReturnError(sql.ErrConnDone)
 
-		_, _, err := store.GetAll()
+		_, _, err := store.GetAll(ctx)
 		assert.Error(t, err)
 	})
 
@@ -251,6 +263,7 @@ func TestPostgresStore_Close(t *testing.T) {
 }
 
 func TestPostgresStore_ConnectionRecovery(t *testing.T) {
+	ctx := context.Background()
 	db1, mock1, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	require.NoError(t, err)
 
@@ -264,7 +277,7 @@ func TestPostgresStore_ConnectionRecovery(t *testing.T) {
 		WithArgs("test", 1.0).
 		WillReturnError(sql.ErrConnDone)
 
-	err = store.SetGauge("test", 1.0)
+	err = store.SetGauge(ctx, "test", 1.0)
 	require.Error(t, err)
 
 	store.mu.Lock()
@@ -287,7 +300,7 @@ func TestPostgresStore_ConnectionRecovery(t *testing.T) {
 		WithArgs("test", 1.0).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err = store.SetGauge("test", 1.0)
+	err = store.SetGauge(ctx, "test", 1.0)
 	require.NoError(t, err)
 
 	store.mu.Lock()

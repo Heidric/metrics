@@ -105,8 +105,7 @@ func (p *PostgresStore) createTable(db *sql.DB) error {
 	return err
 }
 
-func (p *PostgresStore) SetGauge(name string, value float64) error {
-	ctx := context.Background()
+func (p *PostgresStore) SetGauge(ctx context.Context, name string, value float64) error {
 	return withPGRetry(func() error {
 		if err := p.ensureConnected(ctx); err != nil {
 			log.Printf("ensureConnected error: %v", err)
@@ -130,8 +129,7 @@ func (p *PostgresStore) SetGauge(name string, value float64) error {
 	})
 }
 
-func (p *PostgresStore) SetCounter(name string, value int64) error {
-	ctx := context.Background()
+func (p *PostgresStore) SetCounter(ctx context.Context, name string, value int64) error {
 	return withPGRetry(func() error {
 		if err := p.ensureConnected(ctx); err != nil {
 			return err
@@ -147,14 +145,13 @@ func (p *PostgresStore) SetCounter(name string, value int64) error {
 	})
 }
 
-func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
-	ctx := context.Background()
+func (p *PostgresStore) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error {
 	return withPGRetry(func() error {
 		if err := p.ensureConnected(ctx); err != nil {
 			return err
 		}
 
-		tx, err := p.db.Begin()
+		tx, err := p.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin transaction: %w", err)
 		}
@@ -163,13 +160,13 @@ func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
 		for _, m := range metrics {
 			switch m.MType {
 			case "gauge":
-				_, err = tx.Exec(`
+				_, err = tx.ExecContext(ctx, `
 					INSERT INTO metrics (name, mtype, value)
 					VALUES ($1, $2, $3) 
 					ON CONFLICT (name, mtype) DO UPDATE SET value = $3
 				`, m.ID, m.MType, m.Value)
 			case "counter":
-				_, err = tx.Exec(`
+				_, err = tx.ExecContext(ctx, `
 					INSERT INTO metrics (name, mtype, delta)
 					VALUES ($1, $2, $3) 
 					ON CONFLICT (name, mtype) DO UPDATE SET delta = metrics.delta + $3
@@ -190,8 +187,7 @@ func (p *PostgresStore) UpdateMetricsBatch(metrics []*model.Metrics) error {
 	})
 }
 
-func (p *PostgresStore) GetGauge(name string) (float64, error) {
-	ctx := context.Background()
+func (p *PostgresStore) GetGauge(ctx context.Context, name string) (float64, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return 0, err
 	}
@@ -205,8 +201,7 @@ func (p *PostgresStore) GetGauge(name string) (float64, error) {
 	return value, err
 }
 
-func (p *PostgresStore) GetCounter(name string) (int64, error) {
-	ctx := context.Background()
+func (p *PostgresStore) GetCounter(ctx context.Context, name string) (int64, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return 0, err
 	}
@@ -220,8 +215,7 @@ func (p *PostgresStore) GetCounter(name string) (int64, error) {
 	return delta, err
 }
 
-func (p *PostgresStore) GetAll() (map[string]float64, map[string]int64, error) {
-	ctx := context.Background()
+func (p *PostgresStore) GetAll(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return nil, nil, err
 	}
