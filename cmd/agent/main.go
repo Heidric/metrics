@@ -20,7 +20,7 @@ import (
 
 	"github.com/Heidric/metrics.git/internal/cfg"
 	"github.com/Heidric/metrics.git/internal/logger"
-	. "github.com/Heidric/metrics.git/internal/model"
+	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/rs/zerolog"
 )
 
@@ -132,34 +132,34 @@ func (a *Agent) pollMetrics() {
 
 			a.mu.Lock()
 			a.metrics = []Metric{
-				{"Alloc", GaugeType, strconv.FormatFloat(float64(memStats.Alloc), 'f', -1, 64)},
-				{"BuckHashSys", GaugeType, strconv.FormatFloat(float64(memStats.BuckHashSys), 'f', -1, 64)},
-				{"Frees", GaugeType, strconv.FormatFloat(float64(memStats.Frees), 'f', -1, 64)},
-				{"GCCPUFraction", GaugeType, strconv.FormatFloat(memStats.GCCPUFraction, 'f', -1, 64)},
-				{"GCSys", GaugeType, strconv.FormatFloat(float64(memStats.GCSys), 'f', -1, 64)},
-				{"HeapAlloc", GaugeType, strconv.FormatFloat(float64(memStats.HeapAlloc), 'f', -1, 64)},
-				{"HeapIdle", GaugeType, strconv.FormatFloat(float64(memStats.HeapIdle), 'f', -1, 64)},
-				{"HeapInuse", GaugeType, strconv.FormatFloat(float64(memStats.HeapInuse), 'f', -1, 64)},
-				{"HeapObjects", GaugeType, strconv.FormatFloat(float64(memStats.HeapObjects), 'f', -1, 64)},
-				{"HeapReleased", GaugeType, strconv.FormatFloat(float64(memStats.HeapReleased), 'f', -1, 64)},
-				{"HeapSys", GaugeType, strconv.FormatFloat(float64(memStats.HeapSys), 'f', -1, 64)},
-				{"LastGC", GaugeType, strconv.FormatFloat(float64(memStats.LastGC), 'f', -1, 64)},
-				{"Lookups", GaugeType, strconv.FormatFloat(float64(memStats.Lookups), 'f', -1, 64)},
-				{"MCacheInuse", GaugeType, strconv.FormatFloat(float64(memStats.MCacheInuse), 'f', -1, 64)},
-				{"MCacheSys", GaugeType, strconv.FormatFloat(float64(memStats.MCacheSys), 'f', -1, 64)},
-				{"MSpanInuse", GaugeType, strconv.FormatFloat(float64(memStats.MSpanInuse), 'f', -1, 64)},
-				{"MSpanSys", GaugeType, strconv.FormatFloat(float64(memStats.MSpanSys), 'f', -1, 64)},
-				{"Mallocs", GaugeType, strconv.FormatFloat(float64(memStats.Mallocs), 'f', -1, 64)},
-				{"NextGC", GaugeType, strconv.FormatFloat(float64(memStats.NextGC), 'f', -1, 64)},
-				{"NumForcedGC", GaugeType, strconv.FormatFloat(float64(memStats.NumForcedGC), 'f', -1, 64)},
-				{"NumGC", GaugeType, strconv.FormatFloat(float64(memStats.NumGC), 'f', -1, 64)},
-				{"OtherSys", GaugeType, strconv.FormatFloat(float64(memStats.OtherSys), 'f', -1, 64)},
-				{"PauseTotalNs", GaugeType, strconv.FormatFloat(float64(memStats.PauseTotalNs), 'f', -1, 64)},
-				{"StackInuse", GaugeType, strconv.FormatFloat(float64(memStats.StackInuse), 'f', -1, 64)},
-				{"StackSys", GaugeType, strconv.FormatFloat(float64(memStats.StackSys), 'f', -1, 64)},
-				{"Sys", GaugeType, strconv.FormatFloat(float64(memStats.Sys), 'f', -1, 64)},
-				{"TotalAlloc", GaugeType, strconv.FormatFloat(float64(memStats.TotalAlloc), 'f', -1, 64)},
-				{"RandomValue", GaugeType, strconv.FormatFloat(rand.Float64(), 'f', -1, 64)},
+				{"Alloc", model.GaugeType, strconv.FormatFloat(float64(memStats.Alloc), 'f', -1, 64)},
+				{"BuckHashSys", model.GaugeType, strconv.FormatFloat(float64(memStats.BuckHashSys), 'f', -1, 64)},
+				{"Frees", model.GaugeType, strconv.FormatFloat(float64(memStats.Frees), 'f', -1, 64)},
+				{"GCCPUFraction", model.GaugeType, strconv.FormatFloat(memStats.GCCPUFraction, 'f', -1, 64)},
+				{"GCSys", model.GaugeType, strconv.FormatFloat(float64(memStats.GCSys), 'f', -1, 64)},
+				{"HeapAlloc", model.GaugeType, strconv.FormatFloat(float64(memStats.HeapAlloc), 'f', -1, 64)},
+				{"HeapIdle", model.GaugeType, strconv.FormatFloat(float64(memStats.HeapIdle), 'f', -1, 64)},
+				{"HeapInuse", model.GaugeType, strconv.FormatFloat(float64(memStats.HeapInuse), 'f', -1, 64)},
+				{"HeapObjects", model.GaugeType, strconv.FormatFloat(float64(memStats.HeapObjects), 'f', -1, 64)},
+				{"HeapReleased", model.GaugeType, strconv.FormatFloat(float64(memStats.HeapReleased), 'f', -1, 64)},
+				{"HeapSys", model.GaugeType, strconv.FormatFloat(float64(memStats.HeapSys), 'f', -1, 64)},
+				{"LastGC", model.GaugeType, strconv.FormatFloat(float64(memStats.LastGC), 'f', -1, 64)},
+				{"Lookups", model.GaugeType, strconv.FormatFloat(float64(memStats.Lookups), 'f', -1, 64)},
+				{"MCacheInuse", model.GaugeType, strconv.FormatFloat(float64(memStats.MCacheInuse), 'f', -1, 64)},
+				{"MCacheSys", model.GaugeType, strconv.FormatFloat(float64(memStats.MCacheSys), 'f', -1, 64)},
+				{"MSpanInuse", model.GaugeType, strconv.FormatFloat(float64(memStats.MSpanInuse), 'f', -1, 64)},
+				{"MSpanSys", model.GaugeType, strconv.FormatFloat(float64(memStats.MSpanSys), 'f', -1, 64)},
+				{"Mallocs", model.GaugeType, strconv.FormatFloat(float64(memStats.Mallocs), 'f', -1, 64)},
+				{"NextGC", model.GaugeType, strconv.FormatFloat(float64(memStats.NextGC), 'f', -1, 64)},
+				{"NumForcedGC", model.GaugeType, strconv.FormatFloat(float64(memStats.NumForcedGC), 'f', -1, 64)},
+				{"NumGC", model.GaugeType, strconv.FormatFloat(float64(memStats.NumGC), 'f', -1, 64)},
+				{"OtherSys", model.GaugeType, strconv.FormatFloat(float64(memStats.OtherSys), 'f', -1, 64)},
+				{"PauseTotalNs", model.GaugeType, strconv.FormatFloat(float64(memStats.PauseTotalNs), 'f', -1, 64)},
+				{"StackInuse", model.GaugeType, strconv.FormatFloat(float64(memStats.StackInuse), 'f', -1, 64)},
+				{"StackSys", model.GaugeType, strconv.FormatFloat(float64(memStats.StackSys), 'f', -1, 64)},
+				{"Sys", model.GaugeType, strconv.FormatFloat(float64(memStats.Sys), 'f', -1, 64)},
+				{"TotalAlloc", model.GaugeType, strconv.FormatFloat(float64(memStats.TotalAlloc), 'f', -1, 64)},
+				{"RandomValue", model.GaugeType, strconv.FormatFloat(rand.Float64(), 'f', -1, 64)},
 			}
 			a.pollCountDelta++
 			a.mu.Unlock()
@@ -169,7 +169,7 @@ func (a *Agent) pollMetrics() {
 	}
 }
 
-func (a *Agent) sendMetricsBatch(metrics []*Metrics) error {
+func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -204,31 +204,31 @@ func (a *Agent) sendMetricsBatch(metrics []*Metrics) error {
 	return nil
 }
 
-func (a *Agent) prepareMetricsForBatch() []*Metrics {
+func (a *Agent) prepareMetricsForBatch() []*model.Metrics {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	var batch []*Metrics
+	var batch []*model.Metrics
 	for _, m := range a.metrics {
 		switch m.Type {
-		case GaugeType:
+		case model.GaugeType:
 			v, err := strconv.ParseFloat(m.Value, 64)
 			if err != nil {
 				continue
 			}
-			batch = append(batch, &Metrics{
+			batch = append(batch, &model.Metrics{
 				ID:    m.Name,
-				MType: GaugeType,
+				MType: model.GaugeType,
 				Value: &v,
 			})
-		case CounterType:
+		case model.CounterType:
 			d, err := strconv.ParseInt(m.Value, 10, 64)
 			if err != nil {
 				continue
 			}
-			batch = append(batch, &Metrics{
+			batch = append(batch, &model.Metrics{
 				ID:    m.Name,
-				MType: CounterType,
+				MType: model.CounterType,
 				Delta: &d,
 			})
 		}
@@ -236,7 +236,7 @@ func (a *Agent) prepareMetricsForBatch() []*Metrics {
 	return batch
 }
 
-func (a *Agent) sendMetricsIndividually(metrics []*Metrics) {
+func (a *Agent) sendMetricsIndividually(metrics []*model.Metrics) {
 	for _, m := range metrics {
 		data, err := json.Marshal(m)
 		if err != nil {
@@ -283,7 +283,7 @@ func (a *Agent) reportMetrics() {
 			a.pollCountDelta = 0
 			pollCountMetric := Metric{
 				Name:  "PollCount",
-				Type:  CounterType,
+				Type:  model.CounterType,
 				Value: fmt.Sprintf("%d", delta),
 			}
 			a.metrics = append(a.metrics, pollCountMetric)
