@@ -112,6 +112,9 @@ func (p *PostgresStore) SetGauge(ctx context.Context, name string, value float64
 			return err
 		}
 
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
 		query := `
 	        INSERT INTO metrics (name, mtype, value)
 	        VALUES ($1, 'gauge', $2)
@@ -135,6 +138,9 @@ func (p *PostgresStore) SetCounter(ctx context.Context, name string, value int64
 			return err
 		}
 
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
 		query := `
 	        INSERT INTO metrics (name, mtype, delta)
 	        VALUES ($1, 'counter', $2)
@@ -150,6 +156,9 @@ func (p *PostgresStore) UpdateMetricsBatch(ctx context.Context, metrics []*model
 		if err := p.ensureConnected(ctx); err != nil {
 			return err
 		}
+
+		p.mu.Lock()
+		defer p.mu.Unlock()
 
 		tx, err := p.db.BeginTx(ctx, nil)
 		if err != nil {
@@ -192,6 +201,9 @@ func (p *PostgresStore) GetGauge(ctx context.Context, name string) (float64, err
 		return 0, err
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var value float64
 	query := "SELECT value FROM metrics WHERE name = $1 AND mtype = 'gauge'"
 	err := p.db.QueryRowContext(ctx, query, name).Scan(&value)
@@ -206,6 +218,9 @@ func (p *PostgresStore) GetCounter(ctx context.Context, name string) (int64, err
 		return 0, err
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var delta int64
 	query := "SELECT delta FROM metrics WHERE name = $1 AND mtype = 'counter'"
 	err := p.db.QueryRowContext(ctx, query, name).Scan(&delta)
@@ -219,6 +234,9 @@ func (p *PostgresStore) GetAll(ctx context.Context) (map[string]float64, map[str
 	if err := p.ensureConnected(ctx); err != nil {
 		return nil, nil, err
 	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	gauges := make(map[string]float64)
 	counters := make(map[string]int64)
