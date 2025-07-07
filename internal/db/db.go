@@ -46,13 +46,13 @@ func NewStore(filePath string, storeInterval time.Duration) *Store {
 		closeChan:     make(chan struct{}),
 	}
 
-	if err := s.LoadFromFile(); err != nil {
-		fmt.Printf("Warning: failed to load data: %v\n", err)
-	}
-
 	if !s.syncMode && storeInterval > 0 {
 		s.ticker = time.NewTicker(storeInterval)
 		go s.periodicSave()
+	}
+
+	if err := s.LoadFromFile(); err != nil {
+		fmt.Printf("Warning: failed to load data: %v\n", err)
 	}
 
 	return s
@@ -78,10 +78,10 @@ func (s *Store) periodicSave() {
 
 func (s *Store) SetGauge(ctx context.Context, name string, value float64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.gauges[name] = value
+	s.mu.Unlock()
 
-	if s.syncMode {
+	if s.syncMode && s.filePath != "" {
 		s.saveMutex.Lock()
 		defer s.saveMutex.Unlock()
 		return s.saveToFile()
@@ -101,15 +101,14 @@ func (s *Store) GetGauge(ctx context.Context, name string) (float64, error) {
 
 func (s *Store) SetCounter(ctx context.Context, name string, value int64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	current, exists := s.counters[name]
 	if !exists {
 		current = 0
 	}
 	s.counters[name] = current + value
+	s.mu.Unlock()
 
-	if s.syncMode {
+	if s.syncMode && s.filePath != "" {
 		s.saveMutex.Lock()
 		defer s.saveMutex.Unlock()
 		return s.saveToFile()
@@ -131,12 +130,12 @@ func (s *Store) GetAll(ctx context.Context) (map[string]float64, map[string]int6
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	gaugesCopy := make(map[string]float64)
+	gaugesCopy := make(map[string]float64, len(s.gauges))
 	for k, v := range s.gauges {
 		gaugesCopy[k] = v
 	}
 
-	countersCopy := make(map[string]int64)
+	countersCopy := make(map[string]int64, len(s.counters))
 	for k, v := range s.counters {
 		countersCopy[k] = v
 	}
@@ -164,12 +163,23 @@ func (s *Store) saveToFile() error {
 		return nil
 	}
 
+	s.mu.RLock()
+	gaugeCopy := make(map[string]float64, len(s.gauges))
+	for k, v := range s.gauges {
+		gaugeCopy[k] = v
+	}
+	counterCopy := make(map[string]int64, len(s.counters))
+	for k, v := range s.counters {
+		counterCopy[k] = v
+	}
+	s.mu.RUnlock()
+
 	data := struct {
 		Gauges   map[string]float64 `json:"gauges"`
 		Counters map[string]int64   `json:"counters"`
 	}{
-		Gauges:   s.gauges,
-		Counters: s.counters,
+		Gauges:   gaugeCopy,
+		Counters: counterCopy,
 	}
 
 	file, err := os.Create(s.filePath)
@@ -184,6 +194,7 @@ func (s *Store) saveToFile() error {
 		return fmt.Errorf("failed to encode data: %w", err)
 	}
 
+	fmt.Println("[DEBUG] saveToFile completed")
 	return nil
 }
 
@@ -215,17 +226,15 @@ func (s *Store) LoadFromFile() error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.gauges = data.Gauges
 	s.counters = data.Counters
+	s.mu.Unlock()
 
 	return nil
 }
 
 func (s *Store) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	for _, m := range metrics {
 		switch m.MType {
 		case model.GaugeType:
@@ -239,9 +248,18 @@ func (s *Store) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics
 			}
 			s.counters[m.ID] += *m.Delta
 		default:
+			s.mu.Unlock()
 			return fmt.Errorf("unsupported metric type: %s", m.MType)
 		}
 	}
+	s.mu.Unlock()
+
+	if s.syncMode && s.filePath != "" {
+		s.saveMutex.Lock()
+		defer s.saveMutex.Unlock()
+		return s.saveToFile()
+	}
+
 	return nil
 }
 
