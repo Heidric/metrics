@@ -16,6 +16,7 @@ func TestParseFlags(t *testing.T) {
 		wantAddress string
 		wantPoll    time.Duration
 		wantReport  time.Duration
+		wantHashKey string
 	}{
 		{
 			name: "default values",
@@ -23,12 +24,13 @@ func TestParseFlags(t *testing.T) {
 				os.Unsetenv("ADDRESS")
 				os.Unsetenv("POLL_INTERVAL")
 				os.Unsetenv("REPORT_INTERVAL")
-				os.Unsetenv("DATABASE_DSN")
+				os.Unsetenv("HASH_KEY")
 				os.Args = []string{"cmd"}
 			},
 			wantAddress: "localhost:8080",
 			wantPoll:    2 * time.Second,
 			wantReport:  10 * time.Second,
+			wantHashKey: "",
 		},
 		{
 			name: "env variables",
@@ -36,12 +38,13 @@ func TestParseFlags(t *testing.T) {
 				os.Setenv("ADDRESS", "env:8081")
 				os.Setenv("POLL_INTERVAL", "3s")
 				os.Setenv("REPORT_INTERVAL", "15s")
-				os.Setenv("DATABASE_DSN", "env-dsn")
+				os.Setenv("HASH_KEY", "hash-key")
 				os.Args = []string{"cmd"}
 			},
 			wantAddress: "env:8081",
 			wantPoll:    3 * time.Second,
 			wantReport:  15 * time.Second,
+			wantHashKey: "hash-key",
 		},
 		{
 			name: "command line flags",
@@ -49,12 +52,13 @@ func TestParseFlags(t *testing.T) {
 				os.Unsetenv("ADDRESS")
 				os.Unsetenv("POLL_INTERVAL")
 				os.Unsetenv("REPORT_INTERVAL")
-				os.Unsetenv("DATABASE_DSN")
-				os.Args = []string{"cmd", "-a=flag:8082", "-p=4", "-r=20"}
+				os.Unsetenv("HASH_KEY")
+				os.Args = []string{"cmd", "-a=flag:8082", "-p=4", "-r=20", "-k=hash-key-cmd"}
 			},
 			wantAddress: "flag:8082",
 			wantPoll:    4 * time.Second,
 			wantReport:  20 * time.Second,
+			wantHashKey: "hash-key-cmd",
 		},
 	}
 
@@ -65,7 +69,7 @@ func TestParseFlags(t *testing.T) {
 				"ADDRESS":         os.Getenv("ADDRESS"),
 				"POLL_INTERVAL":   os.Getenv("POLL_INTERVAL"),
 				"REPORT_INTERVAL": os.Getenv("REPORT_INTERVAL"),
-				"DATABASE_DSN":    os.Getenv("DATABASE_DSN"),
+				"HASH_KEY":        os.Getenv("HASH_KEY"),
 			}
 			defer func() {
 				os.Args = oldArgs
@@ -77,10 +81,11 @@ func TestParseFlags(t *testing.T) {
 
 			tt.setup()
 			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-			address, poll, report := parseFlags()
+			address, poll, report, hashKey := parseFlags()
 			require.Equal(t, tt.wantAddress, address)
 			require.Equal(t, tt.wantPoll, poll)
 			require.Equal(t, tt.wantReport, report)
+			require.Equal(t, tt.wantHashKey, hashKey)
 		})
 	}
 }

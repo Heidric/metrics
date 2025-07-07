@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Heidric/metrics.git/internal/cfg"
+	"github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/rs/zerolog"
@@ -34,6 +35,7 @@ type Agent struct {
 	serverURL      string
 	pollInterval   time.Duration
 	reportInterval time.Duration
+	hashKey        string
 	metrics        []Metric
 	pollCountDelta int64
 	client         *http.Client
@@ -41,7 +43,7 @@ type Agent struct {
 	stopChan       chan struct{}
 }
 
-func parseFlags() (string, time.Duration, time.Duration) {
+func parseFlags() (string, time.Duration, time.Duration, string) {
 	config, err := cfg.NewConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
@@ -52,6 +54,7 @@ func parseFlags() (string, time.Duration, time.Duration) {
 	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
 	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
 	databaseDSN := flag.String("d", config.DatabaseDSN, "Database DSN")
+	hashKey := flag.String("k", config.HashKey, "hash key")
 
 	flag.Parse()
 
@@ -59,7 +62,7 @@ func parseFlags() (string, time.Duration, time.Duration) {
 		config.DatabaseDSN = *databaseDSN
 	}
 
-	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second
+	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second, *hashKey
 }
 
 func isRetriableHTTP(err error) bool {
@@ -86,11 +89,12 @@ func withRetryHTTP(client *http.Client, req *http.Request) (*http.Response, erro
 	return nil, fmt.Errorf("HTTP request failed after retries: %w", lastErr)
 }
 
-func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
+func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hashKey string) *Agent {
 	return &Agent{
 		serverURL:      "http://" + serverURL,
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
+		hashKey:        hashKey,
 		client:         &http.Client{Timeout: 5 * time.Second},
 		stopChan:       make(chan struct{}),
 	}
@@ -190,6 +194,10 @@ func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	if a.hashKey != "" {
+		hash := crypto.HashSHA256(data, a.hashKey)
+		req.Header.Set("HashSHA256", hash)
+	}
 
 	resp, err := withRetryHTTP(http.DefaultClient, req)
 	if err != nil {
@@ -257,6 +265,10 @@ func (a *Agent) sendMetricsIndividually(metrics []*model.Metrics) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
+		if a.hashKey != "" {
+			hash := crypto.HashSHA256(data, a.hashKey)
+			req.Header.Set("HashSHA256", hash)
+		}
 
 		resp, err := withRetryHTTP(http.DefaultClient, req)
 		if err != nil {
@@ -307,9 +319,9 @@ func main() {
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	logger.Log = &log
 
-	serverAddr, pollInterval, reportInterval := parseFlags()
+	serverAddr, pollInterval, reportInterval, hashKey := parseFlags()
 
-	agent := NewAgent(serverAddr, pollInterval, reportInterval)
+	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey)
 	agent.Run()
 
 	stop := make(chan os.Signal, 1)
