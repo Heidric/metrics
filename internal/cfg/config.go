@@ -18,6 +18,7 @@ type Config struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
+	HashKey         string
 }
 
 func NewConfig() (*Config, error) {
@@ -34,6 +35,7 @@ func NewConfig() (*Config, error) {
 	config.FileStoragePath = getEnv("FILE_STORAGE_PATH", "/tmp/metrics-db.json")
 	config.Restore = parseBool("RESTORE", true)
 	config.DatabaseDSN = getEnv("DATABASE_DSN", "")
+	config.HashKey = getEnv("HASH_KEY", "")
 
 	config.Logger.SetDefault()
 	return config, nil

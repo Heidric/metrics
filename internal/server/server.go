@@ -28,6 +28,7 @@ type Metrics interface {
 
 type Server struct {
 	Srv     *http.Server
+	hashKey string
 	metrics Metrics
 	logger  *zerolog.Logger
 }
@@ -41,12 +42,13 @@ func (g gzipResponseWriter) Write(b []byte) (int, error) {
 	return g.Writer.Write(b)
 }
 
-func NewServer(addr string, metrics Metrics) *Server {
+func NewServer(addr string, hashKey string, metrics Metrics) *Server {
 	logger := zerolog.Nop()
 
 	r := chi.NewRouter()
 	s := &Server{
 		Srv:     &http.Server{Addr: addr, Handler: r},
+		hashKey: hashKey,
 		metrics: metrics,
 		logger:  &logger,
 	}
