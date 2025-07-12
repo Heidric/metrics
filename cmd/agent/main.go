@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,6 +24,8 @@ import (
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/rs/zerolog"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 type Metric struct {
@@ -31,19 +34,32 @@ type Metric struct {
 	Value string
 }
 
+type MetricJob struct {
+	Metric *model.Metrics
+	Ctx    context.Context
+}
+
 type Agent struct {
 	serverURL      string
 	pollInterval   time.Duration
 	reportInterval time.Duration
 	hashKey        string
-	metrics        []Metric
-	pollCountDelta int64
+	rateLimit      int
 	client         *http.Client
-	mu             sync.Mutex
-	stopChan       chan struct{}
+
+	jobChan    chan MetricJob
+	resultChan chan error
+
+	runtimeMetrics []Metric
+	systemMetrics  []Metric
+	pollCountDelta int64
+
+	mu       sync.RWMutex
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
-func parseFlags() (string, time.Duration, time.Duration, string) {
+func parseFlags() (string, time.Duration, time.Duration, string, int) {
 	config, err := cfg.NewConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
@@ -54,7 +70,8 @@ func parseFlags() (string, time.Duration, time.Duration, string) {
 	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
 	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
 	databaseDSN := flag.String("d", config.DatabaseDSN, "Database DSN")
-	hashKey := flag.String("k", config.HashKey, "hash key")
+	hashKey := flag.String("k", config.HashKey, "Hash key")
+	rateLimit := flag.Int("l", getEnvInt("RATE_LIMIT", 10), "Rate limit for concurrent requests")
 
 	flag.Parse()
 
@@ -62,7 +79,16 @@ func parseFlags() (string, time.Duration, time.Duration, string) {
 		config.DatabaseDSN = *databaseDSN
 	}
 
-	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second, *hashKey
+	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second, *hashKey, *rateLimit
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
 }
 
 func isRetriableHTTP(err error) bool {
@@ -89,24 +115,72 @@ func withRetryHTTP(client *http.Client, req *http.Request) (*http.Response, erro
 	return nil, fmt.Errorf("HTTP request failed after retries: %w", lastErr)
 }
 
-func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hashKey string) *Agent {
+func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hashKey string, rateLimit int) *Agent {
 	return &Agent{
 		serverURL:      "http://" + serverURL,
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		hashKey:        hashKey,
+		rateLimit:      rateLimit,
 		client:         &http.Client{Timeout: 5 * time.Second},
+		jobChan:        make(chan MetricJob, 100),
+		resultChan:     make(chan error, 100),
 		stopChan:       make(chan struct{}),
 	}
 }
 
 func (a *Agent) Run() {
-	go a.pollMetrics()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.startWorkerPool(ctx)
+
+	a.wg.Add(3)
+	go a.pollRuntimeMetrics()
+	go a.pollSystemMetrics()
 	go a.reportMetrics()
+
+	go a.processResults()
 }
 
 func (a *Agent) Stop() {
 	close(a.stopChan)
+	a.wg.Wait()
+	close(a.jobChan)
+	close(a.resultChan)
+}
+
+func (a *Agent) startWorkerPool(ctx context.Context) {
+	for i := 0; i < a.rateLimit; i++ {
+		go a.worker(ctx)
+	}
+}
+
+func (a *Agent) worker(ctx context.Context) {
+	for {
+		select {
+		case job, ok := <-a.jobChan:
+			if !ok {
+				return
+			}
+			err := a.sendMetric(job.Ctx, job.Metric)
+			select {
+			case a.resultChan <- err:
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (a *Agent) processResults() {
+	for err := range a.resultChan {
+		if err != nil {
+			logger.Log.Error().Msgf("Metric sending failed: %v", err)
+		}
+	}
 }
 
 func (a *Agent) compressData(data []byte) ([]byte, error) {
@@ -124,7 +198,43 @@ func (a *Agent) compressData(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (a *Agent) pollMetrics() {
+func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
+	data, err := json.Marshal(metric)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metric: %w", err)
+	}
+
+	compressed, err := a.compressData(data)
+	if err != nil {
+		return fmt.Errorf("failed to compress data: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.serverURL+"/update/", bytes.NewReader(compressed))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	if a.hashKey != "" {
+		hash := crypto.HashSHA256(data, a.hashKey)
+		req.Header.Set("HashSHA256", hash)
+	}
+
+	resp, err := withRetryHTTP(a.client, req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func (a *Agent) pollRuntimeMetrics() {
+	defer a.wg.Done()
 	ticker := time.NewTicker(a.pollInterval)
 	defer ticker.Stop()
 
@@ -135,7 +245,7 @@ func (a *Agent) pollMetrics() {
 			runtime.ReadMemStats(&memStats)
 
 			a.mu.Lock()
-			a.metrics = []Metric{
+			a.runtimeMetrics = []Metric{
 				{"Alloc", model.GaugeType, strconv.FormatFloat(float64(memStats.Alloc), 'f', -1, 64)},
 				{"BuckHashSys", model.GaugeType, strconv.FormatFloat(float64(memStats.BuckHashSys), 'f', -1, 64)},
 				{"Frees", model.GaugeType, strconv.FormatFloat(float64(memStats.Frees), 'f', -1, 64)},
@@ -173,117 +283,43 @@ func (a *Agent) pollMetrics() {
 	}
 }
 
-func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
-	if len(metrics) == 0 {
-		return nil
-	}
+func (a *Agent) pollSystemMetrics() {
+	defer a.wg.Done()
+	ticker := time.NewTicker(a.pollInterval)
+	defer ticker.Stop()
 
-	data, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metrics: %w", err)
-	}
+	for {
+		select {
+		case <-ticker.C:
+			var systemMetrics []Metric
 
-	compressed, err := a.compressData(data)
-	if err != nil {
-		return fmt.Errorf("failed to compress data: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, a.serverURL+"/updates/", bytes.NewReader(compressed))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	if a.hashKey != "" {
-		hash := crypto.HashSHA256(data, a.hashKey)
-		req.Header.Set("HashSHA256", hash)
-	}
-
-	resp, err := withRetryHTTP(http.DefaultClient, req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
-	}
-
-	return nil
-}
-
-func (a *Agent) prepareMetricsForBatch() []*model.Metrics {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	var batch []*model.Metrics
-	for _, m := range a.metrics {
-		switch m.Type {
-		case model.GaugeType:
-			v, err := strconv.ParseFloat(m.Value, 64)
-			if err != nil {
-				continue
+			if memInfo, err := mem.VirtualMemory(); err == nil {
+				systemMetrics = append(systemMetrics,
+					Metric{"TotalMemory", model.GaugeType, strconv.FormatFloat(float64(memInfo.Total), 'f', -1, 64)},
+					Metric{"FreeMemory", model.GaugeType, strconv.FormatFloat(float64(memInfo.Free), 'f', -1, 64)},
+				)
 			}
-			batch = append(batch, &model.Metrics{
-				ID:    m.Name,
-				MType: model.GaugeType,
-				Value: &v,
-			})
-		case model.CounterType:
-			d, err := strconv.ParseInt(m.Value, 10, 64)
-			if err != nil {
-				continue
+
+			if cpuPercents, err := cpu.Percent(0, true); err == nil {
+				for i, percent := range cpuPercents {
+					metricName := fmt.Sprintf("CPUutilization%d", i+1)
+					systemMetrics = append(systemMetrics,
+						Metric{metricName, model.GaugeType, strconv.FormatFloat(percent, 'f', -1, 64)},
+					)
+				}
 			}
-			batch = append(batch, &model.Metrics{
-				ID:    m.Name,
-				MType: model.CounterType,
-				Delta: &d,
-			})
-		}
-	}
-	return batch
-}
 
-func (a *Agent) sendMetricsIndividually(metrics []*model.Metrics) {
-	for _, m := range metrics {
-		data, err := json.Marshal(m)
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to marshal metric %s: %v", m.ID, err)
-			continue
-		}
-
-		compressed, err := a.compressData(data)
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to compress metric %s: %v", m.ID, err)
-			continue
-		}
-
-		req, err := http.NewRequest(http.MethodPost, a.serverURL+"/update/", bytes.NewReader(compressed))
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to create request for metric %s: %v", m.ID, err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Content-Encoding", "gzip")
-		if a.hashKey != "" {
-			hash := crypto.HashSHA256(data, a.hashKey)
-			req.Header.Set("HashSHA256", hash)
-		}
-
-		resp, err := withRetryHTTP(http.DefaultClient, req)
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to send metric %s: %v", m.ID, err)
-			continue
-		}
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			logger.Log.Error().Msgf("Server returned %s for metric %s", resp.Status, m.ID)
+			a.mu.Lock()
+			a.systemMetrics = systemMetrics
+			a.mu.Unlock()
+		case <-a.stopChan:
+			return
 		}
 	}
 }
 
 func (a *Agent) reportMetrics() {
+	defer a.wg.Done()
 	ticker := time.NewTicker(a.reportInterval)
 	defer ticker.Stop()
 
@@ -293,35 +329,69 @@ func (a *Agent) reportMetrics() {
 			a.mu.Lock()
 			delta := a.pollCountDelta
 			a.pollCountDelta = 0
-			pollCountMetric := Metric{
+
+			allMetrics := make([]Metric, 0, len(a.runtimeMetrics)+len(a.systemMetrics)+1)
+			allMetrics = append(allMetrics, a.runtimeMetrics...)
+			allMetrics = append(allMetrics, a.systemMetrics...)
+			allMetrics = append(allMetrics, Metric{
 				Name:  "PollCount",
 				Type:  model.CounterType,
 				Value: fmt.Sprintf("%d", delta),
-			}
-			a.metrics = append(a.metrics, pollCountMetric)
+			})
 			a.mu.Unlock()
 
-			batch := a.prepareMetricsForBatch()
-			err := a.sendMetricsBatch(batch)
-
-			if err != nil {
-				logger.Log.Error().Msgf("Batch failed: %v. Sending metrics one by one...", err)
-				a.sendMetricsIndividually(batch)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			for _, m := range allMetrics {
+				modelMetric := a.convertToModelMetric(m)
+				if modelMetric != nil {
+					select {
+					case a.jobChan <- MetricJob{Metric: modelMetric, Ctx: ctx}:
+					case <-ctx.Done():
+						logger.Log.Error().Msg("Context timeout while sending metrics")
+						break
+					}
+				}
 			}
-
+			cancel()
 		case <-a.stopChan:
 			return
 		}
 	}
 }
 
+func (a *Agent) convertToModelMetric(m Metric) *model.Metrics {
+	switch m.Type {
+	case model.GaugeType:
+		v, err := strconv.ParseFloat(m.Value, 64)
+		if err != nil {
+			return nil
+		}
+		return &model.Metrics{
+			ID:    m.Name,
+			MType: model.GaugeType,
+			Value: &v,
+		}
+	case model.CounterType:
+		d, err := strconv.ParseInt(m.Value, 10, 64)
+		if err != nil {
+			return nil
+		}
+		return &model.Metrics{
+			ID:    m.Name,
+			MType: model.CounterType,
+			Delta: &d,
+		}
+	}
+	return nil
+}
+
 func main() {
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	logger.Log = &log
 
-	serverAddr, pollInterval, reportInterval, hashKey := parseFlags()
+	serverAddr, pollInterval, reportInterval, hashKey, rateLimit := parseFlags()
 
-	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey)
+	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey, rateLimit)
 	agent.Run()
 
 	stop := make(chan os.Signal, 1)
