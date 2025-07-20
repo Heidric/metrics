@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/customerrors"
+	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/go-chi/chi"
 )
@@ -25,6 +24,7 @@ func (s *Server) getMetricHandler(w http.ResponseWriter, r *http.Request) {
 			customerrors.WriteError(w, http.StatusNotFound, "")
 			return
 		}
+		logger.Log.Error().Msgf("Failed to get metric [%s]: %v", metricName, err)
 		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
@@ -60,6 +60,7 @@ func (s *Server) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 			customerrors.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		logger.Log.Error().Msgf("Failed to update metric [%s]: %v", name, err)
 		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
@@ -111,6 +112,7 @@ func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, customerrors.ErrKeyNotFound):
 			customerrors.WriteError(w, http.StatusNotFound, "")
 		default:
+			logger.Log.Error().Msgf("Failed to update metric [%s]: %v", metric.MType, err)
 			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
@@ -135,16 +137,10 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, customerrors.ErrKeyNotFound):
 			customerrors.WriteError(w, http.StatusNotFound, "")
 		default:
+			logger.Log.Error().Msgf("Failed to get metric [%s]: %v", metric.MType, err)
 			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
-	}
-
-	if s.hashKey != "" {
-		bodyBytes := new(bytes.Buffer)
-		json.NewEncoder(bodyBytes).Encode(&metric)
-		hash := crypto.HashSHA256(bodyBytes.Bytes(), s.hashKey)
-		w.Header().Set("HashSHA256", hash)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -175,6 +171,7 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) pingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := s.metrics.Ping(r.Context()); err != nil {
+		logger.Log.Error().Msgf("Ping failed: %v", err)
 		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}

@@ -66,7 +66,7 @@ func TestWithRetry(t *testing.T) {
 						}
 						return errors.New("permanent failure")
 					}
-					t.Fatalf("expected 2 attempts, got %d", len(calls))
+					t.Errorf("expected 2 attempts, got %d", len(calls))
 					return nil
 				}
 			}(),

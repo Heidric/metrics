@@ -42,14 +42,14 @@ func NewConfig() (*Config, error) {
 }
 
 func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
+	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
 	return defaultValue
 }
 
 func parseDuration(key string, defaultValue time.Duration) time.Duration {
-	if value, exists := os.LookupEnv(key); exists {
+	if value, ok := os.LookupEnv(key); ok {
 		if sec, err := strconv.Atoi(value); err == nil {
 			return time.Duration(sec) * time.Second
 		}
@@ -61,7 +61,7 @@ func parseDuration(key string, defaultValue time.Duration) time.Duration {
 }
 
 func parseBool(key string, defaultValue bool) bool {
-	if value, exists := os.LookupEnv(key); exists {
+	if value, ok := os.LookupEnv(key); ok {
 		if b, err := strconv.ParseBool(value); err == nil {
 			return b
 		}
