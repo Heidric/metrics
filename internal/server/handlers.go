@@ -1,16 +1,15 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
 	"github.com/Heidric/metrics.git/internal/customerrors"
+	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/go-chi/chi"
 )
@@ -25,6 +24,7 @@ func (s *Server) getMetricHandler(w http.ResponseWriter, r *http.Request) {
 			customerrors.WriteError(w, http.StatusNotFound, "")
 			return
 		}
+		logger.Log.Error().Msgf("Failed to get metric [%s]: %v", metricName, err)
 		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
@@ -60,6 +60,7 @@ func (s *Server) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 			customerrors.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		logger.Log.Error().Msgf("Failed to update metric [%s]: %v", name, err)
 		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}
@@ -91,8 +92,14 @@ func (s *Server) notFoundHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
 	var metric model.Metrics
-	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
+	if err := json.Unmarshal(bodyBytes, &metric); err != nil {
 		customerrors.WriteError(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
@@ -105,6 +112,7 @@ func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, customerrors.ErrKeyNotFound):
 			customerrors.WriteError(w, http.StatusNotFound, "")
 		default:
+			logger.Log.Error().Msgf("Failed to update metric [%s]: %v", metric.MType, err)
 			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
@@ -129,6 +137,7 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, customerrors.ErrKeyNotFound):
 			customerrors.WriteError(w, http.StatusNotFound, "")
 		default:
+			logger.Log.Error().Msgf("Failed to get metric [%s]: %v", metric.MType, err)
 			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
@@ -142,21 +151,18 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("failed to read request body: %v", err)
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	defer r.Body.Close()
 
 	var metrics []*model.Metrics
-	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
-		http.Error(w, "failed to decode metrics", http.StatusBadRequest)
+	if err := json.Unmarshal(bodyBytes, &metrics); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		return
 	}
+
 	if err := s.metrics.UpdateMetricsBatch(metrics); err != nil {
-		http.Error(w, "batch update failed", http.StatusBadRequest)
+		http.Error(w, "Batch update failed", http.StatusBadRequest)
 		return
 	}
 
@@ -165,6 +171,7 @@ func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) pingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := s.metrics.Ping(r.Context()); err != nil {
+		logger.Log.Error().Msgf("Ping failed: %v", err)
 		customerrors.WriteError(w, http.StatusInternalServerError, "")
 		return
 	}

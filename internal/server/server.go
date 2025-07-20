@@ -10,6 +10,7 @@ import (
 
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
+	"github.com/Heidric/metrics.git/internal/server/middleware"
 	"github.com/go-chi/chi"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,7 @@ type Metrics interface {
 
 type Server struct {
 	Srv     *http.Server
+	hashKey string
 	metrics Metrics
 	logger  *zerolog.Logger
 }
@@ -41,12 +43,13 @@ func (g gzipResponseWriter) Write(b []byte) (int, error) {
 	return g.Writer.Write(b)
 }
 
-func NewServer(addr string, metrics Metrics) *Server {
+func NewServer(addr string, hashKey string, metrics Metrics) *Server {
 	logger := zerolog.Nop()
 
 	r := chi.NewRouter()
 	s := &Server{
 		Srv:     &http.Server{Addr: addr, Handler: r},
+		hashKey: hashKey,
 		metrics: metrics,
 		logger:  &logger,
 	}
@@ -59,7 +62,7 @@ func NewServer(addr string, metrics Metrics) *Server {
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", s.updateMetricHandler)
 		r.Get("/value/{metricType}/{metricName}", s.getMetricHandler)
 		r.Post("/update/", s.updateMetricJSONHandler)
-		r.Post("/value/", s.getMetricJSONHandler)
+		r.With(middleware.HashMiddleware(hashKey)).Post("/value/", s.getMetricJSONHandler)
 		r.Post("/updates/", s.updateMetricsBatchHandler)
 		r.Get("/ping", s.pingHandler)
 	})

@@ -18,6 +18,8 @@ func TestServerRoutes(t *testing.T) {
 	testLogger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.Disabled)
 	logger.Log = &testLogger
 
+	hashKey := "hash-key"
+
 	tmpFile, err := os.CreateTemp("", "testdb-")
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +40,7 @@ func TestServerRoutes(t *testing.T) {
 	}
 
 	service := services.NewMetricsService(storage)
-	srv := NewServer(":8080", service)
+	srv := NewServer(":8080", hashKey, service)
 	testServer := httptest.NewServer(srv.Srv.Handler)
 	defer testServer.Close()
 
