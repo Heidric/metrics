@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
+	"github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/go-chi/chi"
@@ -91,8 +91,14 @@ func (s *Server) notFoundHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
 	var metric model.Metrics
-	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
+	if err := json.Unmarshal(bodyBytes, &metric); err != nil {
 		customerrors.WriteError(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
@@ -134,6 +140,13 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.hashKey != "" {
+		bodyBytes := new(bytes.Buffer)
+		json.NewEncoder(bodyBytes).Encode(&metric)
+		hash := crypto.HashSHA256(bodyBytes.Bytes(), s.hashKey)
+		w.Header().Set("HashSHA256", hash)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(metric)
@@ -142,21 +155,18 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("failed to read request body: %v", err)
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	defer r.Body.Close()
 
 	var metrics []*model.Metrics
-	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
-		http.Error(w, "failed to decode metrics", http.StatusBadRequest)
+	if err := json.Unmarshal(bodyBytes, &metrics); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		return
 	}
+
 	if err := s.metrics.UpdateMetricsBatch(metrics); err != nil {
-		http.Error(w, "batch update failed", http.StatusBadRequest)
+		http.Error(w, "Batch update failed", http.StatusBadRequest)
 		return
 	}
 

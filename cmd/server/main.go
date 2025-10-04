@@ -24,6 +24,7 @@ type Config struct {
 	flagStoreInterval   time.Duration
 	flagRestore         bool
 	flagDatabaseDSN     string
+	flagHashKey         string
 }
 
 func loadConfig() (*Config, error) {
@@ -39,6 +40,7 @@ func loadConfig() (*Config, error) {
 	flag.DurationVar(&config.flagStoreInterval, "i", 0, "store interval in seconds")
 	flag.BoolVar(&config.flagRestore, "r", true, "restore data from file")
 	flag.StringVar(&config.flagDatabaseDSN, "d", "", "database DSN")
+	flag.StringVar(&config.flagHashKey, "k", "", "hash key")
 
 	flag.Parse()
 
@@ -56,6 +58,9 @@ func loadConfig() (*Config, error) {
 	}
 	if config.flagDatabaseDSN != "" {
 		config.DatabaseDSN = config.flagDatabaseDSN
+	}
+	if config.flagHashKey != "" {
+		config.HashKey = config.flagHashKey
 	}
 
 	return config, nil
@@ -95,7 +100,7 @@ func main() {
 	}
 
 	metrics := services.NewMetricsService(storage)
-	server := server.NewServer(config.ServerAddress, metrics)
+	server := server.NewServer(config.ServerAddress, config.HashKey, metrics)
 	server.Run(ctx, runner)
 
 	if config.DatabaseDSN == "" && config.StoreInterval > 0 {
