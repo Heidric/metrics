@@ -45,8 +45,6 @@ type Agent struct {
 	reportInterval time.Duration
 	hashKey        string
 	rateLimit      int
-	metrics        []Metric
-	pollCountDelta int64
 	client         *http.Client
 
 	jobChan    chan MetricJob
@@ -289,41 +287,6 @@ func (a *Agent) pollSystemMetrics() {
 	defer a.wg.Done()
 	ticker := time.NewTicker(a.pollInterval)
 	defer ticker.Stop()
-func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	data, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metrics: %w", err)
-	}
-
-	compressed, err := a.compressData(data)
-	if err != nil {
-		return fmt.Errorf("failed to compress data: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, a.serverURL+"/updates/", bytes.NewReader(compressed))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	if a.hashKey != "" {
-		hash := crypto.HashSHA256(data, a.hashKey)
-		req.Header.Set("HashSHA256", hash)
-	}
-
-	resp, err := withRetryHTTP(http.DefaultClient, req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
-	}
 
 	for {
 		select {
@@ -345,38 +308,6 @@ func (a *Agent) sendMetricsBatch(metrics []*model.Metrics) error {
 					)
 				}
 			}
-func (a *Agent) sendMetricsIndividually(metrics []*model.Metrics) {
-	for _, m := range metrics {
-		data, err := json.Marshal(m)
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to marshal metric %s: %v", m.ID, err)
-			continue
-		}
-
-		compressed, err := a.compressData(data)
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to compress metric %s: %v", m.ID, err)
-			continue
-		}
-
-		req, err := http.NewRequest(http.MethodPost, a.serverURL+"/update/", bytes.NewReader(compressed))
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to create request for metric %s: %v", m.ID, err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Content-Encoding", "gzip")
-		if a.hashKey != "" {
-			hash := crypto.HashSHA256(data, a.hashKey)
-			req.Header.Set("HashSHA256", hash)
-		}
-
-		resp, err := withRetryHTTP(http.DefaultClient, req)
-		if err != nil {
-			logger.Log.Error().Msgf("Failed to send metric %s: %v", m.ID, err)
-			continue
-		}
-		resp.Body.Close()
 
 			a.mu.Lock()
 			a.systemMetrics = systemMetrics
