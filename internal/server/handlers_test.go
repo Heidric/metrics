@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,17 +55,17 @@ func newTestServer(t *testing.T, metrics *mockMetrics, hashKey string) (*chi.Mux
 func ptrFloat64(v float64) *float64 { return &v }
 func ptrInt64(v int64) *int64       { return &v }
 
-func gzipCompress(t *testing.T, raw []byte) []byte {
+func gzipCompress(t *testing.T, raw []byte) ([]byte, error) {
 	t.Helper()
 	var buf bytes.Buffer
 	gzw := gzip.NewWriter(&buf)
 	if _, err := gzw.Write(raw); err != nil {
-		t.Fatalf("gzip write failed: %v", err)
+		return nil, fmt.Errorf("gzip write failed: %v", err)
 	}
 	if err := gzw.Close(); err != nil {
-		t.Fatalf("gzip close failed: %v", err)
+		return nil, fmt.Errorf("gzip close failed: %v", err)
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 func TestHandlers(t *testing.T) {
@@ -74,7 +75,11 @@ func TestHandlers(t *testing.T) {
 		}
 		r, _ := newTestServer(t, mock, "")
 		metric := model.Metrics{ID: "temp", MType: model.GaugeType, Value: ptrFloat64(42.5)}
-		body, _ := json.Marshal(metric)
+		body, err := json.Marshal(metric)
+		if err != nil {
+			t.Errorf("metrics marshalling failed: %v", err)
+			return
+		}
 
 		req := httptest.NewRequest("POST", "/update/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -95,7 +100,11 @@ func TestHandlers(t *testing.T) {
 		}
 		r, _ := newTestServer(t, mock, "")
 		metric := model.Metrics{ID: model.CounterType, MType: model.CounterType, Delta: ptrInt64(5)}
-		body, _ := json.Marshal(metric)
+		body, err := json.Marshal(metric)
+		if err != nil {
+			t.Errorf("metrics marshalling failed: %v", err)
+			return
+		}
 
 		req := httptest.NewRequest("POST", "/update/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -115,7 +124,11 @@ func TestHandlers(t *testing.T) {
 		}
 		r, _ := newTestServer(t, mock, "")
 		metric := model.Metrics{ID: "invalid", MType: "bad"}
-		body, _ := json.Marshal(metric)
+		body, err := json.Marshal(metric)
+		if err != nil {
+			t.Errorf("metrics marshalling failed: %v", err)
+			return
+		}
 
 		req := httptest.NewRequest("POST", "/update/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -141,9 +154,18 @@ func TestHandlers(t *testing.T) {
 			{ID: "m1", MType: model.GaugeType, Value: ptrFloat64(3.14)},
 			{ID: "m2", MType: model.CounterType, Delta: ptrInt64(1)},
 		}
-		raw, _ := json.Marshal(metrics)
+		raw, err := json.Marshal(metrics)
+		if err != nil {
+			t.Errorf("metrics marshalling failed: %v", err)
+			return
+		}
+		compressed, err := gzipCompress(t, raw)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 
-		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(gzipCompress(t, raw)))
+		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(compressed))
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -162,7 +184,11 @@ func TestHandlers(t *testing.T) {
 		r, _ := newTestServer(t, mock, key)
 
 		metric := model.Metrics{ID: "x", MType: model.GaugeType, Value: ptrFloat64(1.0)}
-		data, _ := json.Marshal(metric)
+		data, err := json.Marshal(metric)
+		if err != nil {
+			t.Errorf("metrics marshalling failed: %v", err)
+			return
+		}
 		hash := crypto.HashSHA256(data, key)
 
 		req := httptest.NewRequest("POST", "/update/", bytes.NewReader(data))
@@ -186,10 +212,19 @@ func TestHandlers(t *testing.T) {
 		metrics := []*model.Metrics{
 			{ID: "a", MType: model.CounterType, Delta: ptrInt64(5)},
 		}
-		raw, _ := json.Marshal(metrics)
+		raw, err := json.Marshal(metrics)
+		if err != nil {
+			t.Errorf("metrics marshalling failed: %v", err)
+			return
+		}
 		hash := crypto.HashSHA256(raw, key)
+		compressed, err := gzipCompress(t, raw)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 
-		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(gzipCompress(t, raw)))
+		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(compressed))
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("HashSHA256", hash)

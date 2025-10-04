@@ -93,7 +93,7 @@ func (s *Store) GetGauge(ctx context.Context, name string) (float64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if value, exists := s.gauges[name]; exists {
+	if value, ok := s.gauges[name]; ok {
 		return value, nil
 	}
 	return 0, customerrors.ErrKeyNotFound
@@ -101,8 +101,8 @@ func (s *Store) GetGauge(ctx context.Context, name string) (float64, error) {
 
 func (s *Store) SetCounter(ctx context.Context, name string, value int64) error {
 	s.mu.Lock()
-	current, exists := s.counters[name]
-	if !exists {
+	current, ok := s.counters[name]
+	if !ok {
 		current = 0
 	}
 	s.counters[name] = current + value
@@ -120,7 +120,7 @@ func (s *Store) GetCounter(ctx context.Context, name string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if value, exists := s.counters[name]; exists {
+	if value, ok := s.counters[name]; ok {
 		return value, nil
 	}
 	return 0, customerrors.ErrKeyNotFound
