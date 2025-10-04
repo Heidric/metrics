@@ -11,13 +11,13 @@ import (
 
 func TestParseFlags(t *testing.T) {
 	tests := []struct {
-		name          string
-		setup         func()
-		wantAddress   string
-		wantPoll      time.Duration
-		wantReport    time.Duration
-		wantHashKey   string
-		wantRateLimit int
+		name        string
+		setup       func()
+		wantAddress string
+		wantPoll    time.Duration
+		wantReport  time.Duration
+		wantHashKey string
+    antRateLimit int
 	}{
 		{
 			name: "default values",

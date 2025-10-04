@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
@@ -141,6 +142,13 @@ func (s *Server) getMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 			customerrors.WriteError(w, http.StatusInternalServerError, "")
 		}
 		return
+	}
+
+	if s.hashKey != "" {
+		bodyBytes := new(bytes.Buffer)
+		json.NewEncoder(bodyBytes).Encode(&metric)
+		hash := crypto.HashSHA256(bodyBytes.Bytes(), s.hashKey)
+		w.Header().Set("HashSHA256", hash)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

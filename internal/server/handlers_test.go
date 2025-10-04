@@ -164,6 +164,7 @@ func TestHandlers(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		raw, _ := json.Marshal(metrics)
 
 		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(compressed))
 		req.Header.Set("Content-Encoding", "gzip")
@@ -223,6 +224,8 @@ func TestHandlers(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		raw, _ := json.Marshal(metrics)
+		hash := crypto.HashSHA256(raw, key)
 
 		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(compressed))
 		req.Header.Set("Content-Encoding", "gzip")
