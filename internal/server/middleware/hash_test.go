@@ -40,7 +40,6 @@ func TestHashMiddleware_ComputesHashAndWritesOKIfNoHeader(t *testing.T) {
 	body := []byte("payload to be hashed")
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Do not write header explicitly to trigger hrw.wroteHeader=false path
 		_, _ = w.Write(body)
 	})
 	h := mw(next)
@@ -50,7 +49,6 @@ func TestHashMiddleware_ComputesHashAndWritesOKIfNoHeader(t *testing.T) {
 
 	h.ServeHTTP(rec, req)
 
-	// When next did not write header, middleware should set 200 OK
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 	}
@@ -61,7 +59,6 @@ func TestHashMiddleware_ComputesHashAndWritesOKIfNoHeader(t *testing.T) {
 		t.Fatalf("expected HashSHA256 header to be set")
 	}
 
-	// Validate header is a valid hex string and equals expected
 	if _, err := hex.DecodeString(got); err != nil {
 		t.Fatalf("invalid hex in HashSHA256 header: %v", err)
 	}
