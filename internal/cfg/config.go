@@ -9,6 +9,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Config holds service configuration: listen address, signing/hash keys,
+// storage backends, and feature flags.
 type Config struct {
 	Logger          *log.Config
 	ServerAddress   string
@@ -21,6 +23,7 @@ type Config struct {
 	HashKey         string
 }
 
+// NewConfig constructs and returns a Config loaded from environment/flags
 func NewConfig() (*Config, error) {
 	godotenv.Load()
 

@@ -16,6 +16,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Metrics defines the storage contract for metrics: read/update operations
+// and health checks. Implement this interface to back the HTTP handlers.
 type Metrics interface {
 	ListMetrics() map[string]string
 	GetMetric(metricType, metricName string) (string, error)
@@ -27,6 +29,9 @@ type Metrics interface {
 	Ping(ctx context.Context) error
 }
 
+// Server wraps the HTTP server and wires routes/middleware for the metrics API.
+// Handlers expose read/update operations and a health endpoint. Construct via
+// NewServer and run the embedded *http.Server.
 type Server struct {
 	Srv     *http.Server
 	hashKey string
@@ -39,10 +44,16 @@ type gzipResponseWriter struct {
 	http.ResponseWriter
 }
 
+// Write compresses and writes the response body using the underlying gzip.Writer.
 func (g gzipResponseWriter) Write(b []byte) (int, error) {
 	return g.Writer.Write(b)
 }
 
+// NewServer configures the router and middleware and returns a ready-to-run
+// HTTP server for metrics. The returned Server embeds *http.Server.
+//   - addr: listen address (e.g. ":8080")
+//   - hashKey: key used by middleware that sign/verify payloads
+//   - metrics: storage implementation backing the handlers
 func NewServer(addr string, hashKey string, metrics Metrics) *Server {
 	logger := zerolog.Nop()
 
@@ -111,6 +122,9 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// Run starts the HTTP server in the provided errgroup.Group.
+// It schedules ListenAndServe on the group and returns immediately.
+// http.ErrServerClosed is treated as a normal shutdown signal.
 func (s *Server) Run(ctx context.Context, runner *errgroup.Group) {
 	logger.Log.Info().Msg("Http server started.")
 
@@ -122,6 +136,8 @@ func (s *Server) Run(ctx context.Context, runner *errgroup.Group) {
 	})
 }
 
+// Shutdown performs a graceful shutdown of the HTTP server with a 10-second timeout.
+// It stops accepting new connections and waits for in-flight requests to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
 	logger.Log.Info().Msg("Http server stopped.")
 
@@ -131,6 +147,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.Srv.Shutdown(nctx)
 }
 
+// GetRouter returns the underlying *chi.Mux used as the server's handler.
+// Used for tests and for wiring additional routes/middleware at startup.
 func (s *Server) GetRouter() *chi.Mux {
 	return s.Srv.Handler.(*chi.Mux)
 }

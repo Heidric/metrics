@@ -13,10 +13,16 @@ import (
 	"github.com/rs/zerolog/pkgerrors"
 )
 
+// Logger is a thin wrapper around a zerolog-based logger.
+// It provides structured, concurrent-safe logging and helpers for attaching
+// contextual fields across the service.
 type Logger struct {
 	zerolog zerolog.Logger
 }
 
+// NewLogger constructs and returns a Logger configured for this service.
+// The constructor wires formatting/level according to Config and the provided
+// outputs, and is intended to be shared via dependency injection.
 func NewLogger(ctx context.Context, config *Config) (*Logger, error) {
 	logger := &Logger{}
 	config.SetDefault()
@@ -37,6 +43,8 @@ func NewLogger(ctx context.Context, config *Config) (*Logger, error) {
 	return logger, nil
 }
 
+// Zerolog exposes the underlying *zerolog.Logger for advanced use-cases,
+// such as passing it to third-party libraries that expect a zerolog logger.
 func (l *Logger) Zerolog() *zerolog.Logger {
 	return &l.zerolog
 }
