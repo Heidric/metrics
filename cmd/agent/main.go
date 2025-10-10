@@ -28,17 +28,23 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+// Metric is a name/type/value object collected by the agent
+// before it is converted into the model.Metrics.
 type Metric struct {
 	Name  string
 	Type  string
 	Value string
 }
 
+// MetricJob represents a single unit of work for the agent’s worker pool.
+// Metric holds the payload to send; Ctx carries per-job cancellation/deadline.
 type MetricJob struct {
 	Metric *model.Metrics
 	Ctx    context.Context
 }
 
+// Agent periodically collects runtime/system metrics and reports them to the server.
+// Concurrency: collection and reporting run in goroutines; channels coordinate work.
 type Agent struct {
 	serverURL      string
 	pollInterval   time.Duration
@@ -47,16 +53,16 @@ type Agent struct {
 	rateLimit      int
 	client         *http.Client
 
-	jobChan    chan MetricJob
-	resultChan chan error
+	jobChan    chan MetricJob // inbound jobs for the worker pool
+	resultChan chan error     // reporting results (nil on success)
 
-	runtimeMetrics []Metric
-	systemMetrics  []Metric
-	pollCountDelta int64
+	runtimeMetrics []Metric // cached runtime metrics snapshot
+	systemMetrics  []Metric // cached system metrics snapshot
+	pollCountDelta int64    // aggregate delta for counter-type metrics
 
-	mu       sync.RWMutex
-	stopChan chan struct{}
-	wg       sync.WaitGroup
+	mu       sync.RWMutex   // guards runtime/system metric caches and counters
+	stopChan chan struct{}  // signals all goroutines to stop
+	wg       sync.WaitGroup // waits for collectors/reporters to exit
 }
 
 func parseFlags() (string, time.Duration, time.Duration, string, int) {
@@ -115,6 +121,9 @@ func withRetryHTTP(client *http.Client, req *http.Request) (*http.Response, erro
 	return nil, fmt.Errorf("HTTP request failed after retries: %w", lastErr)
 }
 
+// NewAgent constructs an Agent with the given server endpoint, polling/reporting
+// intervals, optional HMAC key, and a concurrency rate limit.
+// serverURL is host:port (scheme is prefixed as "http://").
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hashKey string, rateLimit int) *Agent {
 	return &Agent{
 		serverURL:      "http://" + serverURL,
@@ -129,6 +138,8 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hash
 	}
 }
 
+// Run starts the agent’s worker pool, collectors, and reporting loops.
+// It returns immediately; goroutines keep running until Stop is called.
 func (a *Agent) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -143,6 +154,8 @@ func (a *Agent) Run() {
 	go a.processResults()
 }
 
+// Stop signals all goroutines to exit and waits for them to finish.
+// Channels are closed after all workers have drained.
 func (a *Agent) Stop() {
 	close(a.stopChan)
 	a.wg.Wait()

@@ -13,12 +13,18 @@ var (
 	ErrNotConnected = errors.New("database not connected")
 )
 
+// CommonError represents an error that can be rendered as a JSON HTTP response.
+// It carries the HTTP status and a human-readable title/detail.
 type CommonError struct {
 	Title   string `json:"title"`
 	Status  int    `json:"status"`
 	Details string `json:"detail"`
 }
 
+// WriteError writes a JSON error response with the given HTTP status code.
+// It sets Content-Type to "application/json", selects a default title/detail
+// from the status code (see statusText), and overrides the detail when
+// customDetail is non-empty.
 func WriteError(w http.ResponseWriter, status int, customDetail string) {
 	title, defaultDetail := statusText(status)
 

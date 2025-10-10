@@ -15,6 +15,7 @@ import (
 	"github.com/Heidric/metrics.git/internal/model"
 )
 
+// PostgresStore persists metrics in PostgreSQL using database/sql (pgx driver).
 type PostgresStore struct {
 	dsn       string
 	db        *sql.DB
@@ -23,6 +24,9 @@ type PostgresStore struct {
 	closeOnce sync.Once
 }
 
+// NewPostgresStore creates a PostgreSQL-backed store using the provided DSN.
+// The underlying *sql.DB is initialized via the pgx stdlib driver.
+// Use Ping to verify connectivity after construction.
 func NewPostgresStore(dsn string) *PostgresStore {
 	return &PostgresStore{dsn: dsn}
 }
@@ -102,6 +106,8 @@ func (p *PostgresStore) createTable(db *sql.DB) error {
 	return err
 }
 
+// SetGauge sets the absolute value of a gauge metric.
+// If the metric does not exist it is created; otherwise it is updated in place.
 func (p *PostgresStore) SetGauge(ctx context.Context, name string, value float64) error {
 	return withPGRetry(func() error {
 		if err := p.ensureConnected(ctx); err != nil {
@@ -129,6 +135,9 @@ func (p *PostgresStore) SetGauge(ctx context.Context, name string, value float64
 	})
 }
 
+// SetCounter sets the absolute value of a counter metric.
+// Counter deltas should be applied in the service layer; this method persists
+// the resulting value. If the metric does not exist it is created.
 func (p *PostgresStore) SetCounter(ctx context.Context, name string, value int64) error {
 	return withPGRetry(func() error {
 		if err := p.ensureConnected(ctx); err != nil {
@@ -148,6 +157,9 @@ func (p *PostgresStore) SetCounter(ctx context.Context, name string, value int64
 	})
 }
 
+// UpdateMetricsBatch applies multiple metric updates in a single request.
+// Implementation uses a transaction and UPSERT semantics to persist
+// both gauge and counter items.
 func (p *PostgresStore) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error {
 	return withPGRetry(func() error {
 		if err := p.ensureConnected(ctx); err != nil {
@@ -193,6 +205,8 @@ func (p *PostgresStore) UpdateMetricsBatch(ctx context.Context, metrics []*model
 	})
 }
 
+// GetGauge returns the current value of a gauge metric.
+// Returns customerrors.ErrKeyNotFound if the metric key does not exist.
 func (p *PostgresStore) GetGauge(ctx context.Context, name string) (float64, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return 0, err
@@ -210,6 +224,8 @@ func (p *PostgresStore) GetGauge(ctx context.Context, name string) (float64, err
 	return value, err
 }
 
+// GetCounter returns the current value of a counter metric.
+// Returns customerrors.ErrKeyNotFound if the metric key does not exist.
 func (p *PostgresStore) GetCounter(ctx context.Context, name string) (int64, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return 0, err
@@ -227,6 +243,8 @@ func (p *PostgresStore) GetCounter(ctx context.Context, name string) (int64, err
 	return delta, err
 }
 
+// GetAll returns all metrics as two maps: gauges and counters.
+// Keys are metric names; values are the current numeric values.
 func (p *PostgresStore) GetAll(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return nil, nil, err
@@ -274,6 +292,8 @@ func (p *PostgresStore) GetAll(ctx context.Context) (map[string]float64, map[str
 	return gauges, counters, nil
 }
 
+// Ping performs a health check against the database connection.
+// It returns nil when the database is reachable and responding.
 func (p *PostgresStore) Ping(ctx context.Context) error {
 	if err := p.ensureConnected(ctx); err != nil {
 		return customerrors.ErrNotConnected
@@ -288,6 +308,7 @@ func (p *PostgresStore) Ping(ctx context.Context) error {
 	return p.db.PingContext(ctx)
 }
 
+// Close closes the underlying database handle.
 func (p *PostgresStore) Close() error {
 	if !p.connected {
 		return nil
