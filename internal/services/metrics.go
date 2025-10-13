@@ -124,7 +124,7 @@ func (m *MetricsService) GetMetricJSON(metric *model.Metrics) error {
 
 func (m *MetricsService) UpdateMetricsBatch(metrics []*model.Metrics) error {
 	ctx := context.Background()
-	var valid []*model.Metrics
+	valid := metrics[:0]
 	for _, metric := range metrics {
 		if metric == nil || metric.ID == "" || metric.MType == "" {
 			continue
