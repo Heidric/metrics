@@ -17,14 +17,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Config aggregates runtime configuration for the server command.
+// It embeds cfg.Config (shared service settings) and carries CLI flag values
+// parsed in main before they are merged into the final runtime config.
 type Config struct {
 	cfg.Config
-	flagAddress         string
-	flagFileStoragePath string
-	flagStoreInterval   time.Duration
-	flagRestore         bool
-	flagDatabaseDSN     string
-	flagHashKey         string
+
+	flagAddress         string        // listen address from flag (e.g., ":8080")
+	flagFileStoragePath string        // path to JSON file for on-disk persistence
+	flagStoreInterval   time.Duration // interval for periodic persistence; 0 => sync on each update
+	flagRestore         bool          // restore state from file on startup
+	flagDatabaseDSN     string        // PostgreSQL DSN; when set, enables DB-backed storage
+	flagHashKey         string        // HMAC key used by hash middleware and related logic
 }
 
 func loadConfig() (*Config, error) {

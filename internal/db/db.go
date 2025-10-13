@@ -12,6 +12,7 @@ import (
 	"github.com/Heidric/metrics.git/internal/model"
 )
 
+// MetricsStorage defines the storage contract used by the service layer.
 type MetricsStorage interface {
 	SetGauge(ctx context.Context, name string, value float64) error
 	GetGauge(ctx context.Context, name string) (float64, error)
@@ -23,6 +24,7 @@ type MetricsStorage interface {
 	Close() error
 }
 
+// Store is an in-memory metrics store with optional file persistence.
 type Store struct {
 	mu            sync.RWMutex
 	gauges        map[string]float64
@@ -36,6 +38,10 @@ type Store struct {
 	closed        bool
 }
 
+// NewStore constructs an in-memory store with optional persistence.
+//   - filePath: path to a JSON file for persistence (empty disables persistence)
+//   - storeInterval: if zero, writes are synced on every update; otherwise,
+//     the store saves periodically using a background ticker.
 func NewStore(filePath string, storeInterval time.Duration) *Store {
 	s := &Store{
 		gauges:        make(map[string]float64),
@@ -76,6 +82,9 @@ func (s *Store) periodicSave() {
 	}
 }
 
+// SetGauge sets the absolute value of a gauge metric.
+// If the metric does not exist, it is created. In sync mode the change is
+// immediately flushed to disk when file persistence is enabled.
 func (s *Store) SetGauge(ctx context.Context, name string, value float64) error {
 	s.mu.Lock()
 	s.gauges[name] = value
@@ -89,6 +98,8 @@ func (s *Store) SetGauge(ctx context.Context, name string, value float64) error 
 	return nil
 }
 
+// GetGauge returns the current value of a gauge metric.
+// Returns customerrors.ErrKeyNotFound if the metric key does not exist.
 func (s *Store) GetGauge(ctx context.Context, name string) (float64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -99,6 +110,9 @@ func (s *Store) GetGauge(ctx context.Context, name string) (float64, error) {
 	return 0, customerrors.ErrKeyNotFound
 }
 
+// SetCounter sets the absolute value of a counter metric.
+// Counter deltas should be applied at the service layer; this method persists
+// the resulting value. Creates the metric if it does not exist.
 func (s *Store) SetCounter(ctx context.Context, name string, value int64) error {
 	s.mu.Lock()
 	current, ok := s.counters[name]
@@ -116,6 +130,8 @@ func (s *Store) SetCounter(ctx context.Context, name string, value int64) error 
 	return nil
 }
 
+// GetCounter returns the current value of a counter metric.
+// Returns customerrors.ErrKeyNotFound if the metric key does not exist.
 func (s *Store) GetCounter(ctx context.Context, name string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -126,6 +142,8 @@ func (s *Store) GetCounter(ctx context.Context, name string) (int64, error) {
 	return 0, customerrors.ErrKeyNotFound
 }
 
+// GetAll returns all metrics split by type: gauges and counters.
+// Keys are metric names; values are the current numeric values.
 func (s *Store) GetAll(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -143,6 +161,8 @@ func (s *Store) GetAll(ctx context.Context) (map[string]float64, map[string]int6
 	return gaugesCopy, countersCopy, nil
 }
 
+// Close stops the background ticker (if any) and flushes state to disk
+// when persistence is enabled.
 func (s *Store) Close() error {
 	s.closed = true
 	close(s.closeChan)
@@ -152,6 +172,8 @@ func (s *Store) Close() error {
 	return s.saveToFile()
 }
 
+// SaveToFile writes the current in-memory metrics state to the configured file immediately.
+// Returns an error if encoding or filesystem operations fail.
 func (s *Store) SaveToFile() error {
 	s.saveMutex.Lock()
 	defer s.saveMutex.Unlock()
@@ -198,6 +220,8 @@ func (s *Store) saveToFile() error {
 	return nil
 }
 
+// LoadFromFile restores the in-memory metrics state from the configured file.
+// Returns an error if the file cannot be opened or JSON cannot be decoded.
 func (s *Store) LoadFromFile() error {
 	s.saveMutex.Lock()
 	defer s.saveMutex.Unlock()
@@ -233,6 +257,9 @@ func (s *Store) LoadFromFile() error {
 	return nil
 }
 
+// UpdateMetricsBatch applies multiple metric updates in a single call.
+// Gauge items set absolute values; counter items set absolute counters (the
+// service is expected to have applied deltas).
 func (s *Store) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics) error {
 	s.mu.Lock()
 	for _, m := range metrics {
@@ -263,6 +290,7 @@ func (s *Store) UpdateMetricsBatch(ctx context.Context, metrics []*model.Metrics
 	return nil
 }
 
+// Ping reports the store's liveness. For the in-memory store it always returns nil.
 func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
