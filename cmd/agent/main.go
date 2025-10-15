@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -40,30 +41,30 @@ type MetricJob struct {
 }
 
 type Agent struct {
-	serverURL      string
-	pollInterval   time.Duration
-	reportInterval time.Duration
-	hashKey        string
-	rateLimit      int
+	serverURL string
+	hashKey   string
+
 	client         *http.Client
-
-	jobChan    chan MetricJob
-	resultChan chan error
-
+	jobChan        chan MetricJob
+	resultChan     chan error
+	stopChan       chan struct{}
 	runtimeMetrics []Metric
 	systemMetrics  []Metric
+
+	pollInterval   time.Duration
+	reportInterval time.Duration
 	pollCountDelta int64
 
-	mu       sync.RWMutex
-	stopChan chan struct{}
-	wg       sync.WaitGroup
+	rateLimit int
+
+	mu sync.RWMutex
+	wg sync.WaitGroup
 }
 
 func parseFlags() (string, time.Duration, time.Duration, string, int) {
 	config, err := cfg.NewConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error loading config: %v\n", err)
 	}
 
 	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")

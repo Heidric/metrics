@@ -12,13 +12,15 @@ import (
 type Config struct {
 	Logger          *log.Config
 	ServerAddress   string
-	PollInterval    time.Duration
-	ReportInterval  time.Duration
-	StoreInterval   time.Duration
 	FileStoragePath string
-	Restore         bool
 	DatabaseDSN     string
 	HashKey         string
+
+	PollInterval   time.Duration
+	ReportInterval time.Duration
+	StoreInterval  time.Duration
+
+	Restore bool
 }
 
 func NewConfig() (*Config, error) {
@@ -42,7 +44,7 @@ func NewConfig() (*Config, error) {
 }
 
 func getEnv(key, defaultValue string) string {
-	if value, ok := os.LookupEnv(key); ok {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
 		return value
 	}
 	return defaultValue

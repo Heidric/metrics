@@ -16,10 +16,13 @@ import (
 )
 
 type PostgresStore struct {
-	dsn       string
-	db        *sql.DB
-	mu        sync.Mutex
+	db *sql.DB
+
+	dsn string
+
 	connected bool
+
+	mu        sync.Mutex
 	closeOnce sync.Once
 }
 

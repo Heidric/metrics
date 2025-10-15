@@ -18,13 +18,16 @@ import (
 )
 
 type Config struct {
-	cfg.Config
 	flagAddress         string
 	flagFileStoragePath string
-	flagStoreInterval   time.Duration
-	flagRestore         bool
 	flagDatabaseDSN     string
 	flagHashKey         string
+
+	cfg.Config
+
+	flagStoreInterval time.Duration
+
+	flagRestore bool
 }
 
 func loadConfig() (*Config, error) {
@@ -53,7 +56,13 @@ func loadConfig() (*Config, error) {
 	if config.flagStoreInterval != 0 {
 		config.StoreInterval = config.flagStoreInterval
 	}
-	if flag.Lookup("r") != nil && flag.Lookup("r").Value.String() != "" {
+	var restoreSet bool
+	flag.CommandLine.Visit(func(f *flag.Flag) {
+		if f.Name == "r" {
+			restoreSet = true
+		}
+	})
+	if restoreSet {
 		config.Restore = config.flagRestore
 	}
 	if config.flagDatabaseDSN != "" {

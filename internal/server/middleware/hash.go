@@ -45,6 +45,7 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 
 func (w *hashResponseWriter) WriteHeader(code int) {
 	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *hashResponseWriter) Write(b []byte) (int, error) {

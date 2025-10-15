@@ -7,9 +7,9 @@ import (
 )
 
 type retryTest struct {
-	name          string
 	exec          func() error
 	expectedErr   error
+	name          string
 	expectedTries int
 }
 

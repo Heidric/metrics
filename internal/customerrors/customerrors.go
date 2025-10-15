@@ -15,8 +15,9 @@ var (
 
 type CommonError struct {
 	Title   string `json:"title"`
-	Status  int    `json:"status"`
 	Details string `json:"detail"`
+
+	Status int `json:"status"`
 }
 
 func WriteError(w http.ResponseWriter, status int, customDetail string) {
