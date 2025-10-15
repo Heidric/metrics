@@ -29,6 +29,27 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
+func printBuildInfo() {
+	if buildVersion == "" {
+		buildVersion = "N/A"
+	}
+	if buildDate == "" {
+		buildDate = "N/A"
+	}
+	if buildCommit == "" {
+		buildCommit = "N/A"
+	}
+	fmt.Println("Build version:", buildVersion)
+	fmt.Println("Build date:", buildDate)
+	fmt.Println("Build commit:", buildCommit)
+}
+
 // Metric is a name/type/value object collected by the agent
 // before it is converted into the model.Metrics.
 type Metric struct {
@@ -400,6 +421,8 @@ func (a *Agent) convertToModelMetric(m Metric) *model.Metrics {
 }
 
 func main() {
+	printBuildInfo()
+
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	logger.Log = &log
 
