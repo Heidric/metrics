@@ -1,17 +1,68 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 
+	"github.com/Heidric/metrics.git/internal/crypto"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
+	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/Heidric/metrics.git/internal/services"
 	"github.com/rs/zerolog"
 )
+
+type stubMetrics struct {
+	getErr        error
+	jsonGetErr    error
+	jsonUpdateErr error
+	batchErr      error
+	pingErr       error
+
+	list   map[string]string
+	getVal string
+}
+
+type counterValidatingStub struct{ stubMetrics }
+
+func (s *counterValidatingStub) UpdateCounter(name, value string) error {
+	if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+		return customerrors.ErrInvalidValue
+	}
+	return nil
+}
+func (s *stubMetrics) ListMetrics() map[string]string { return s.list }
+func (s *stubMetrics) GetMetric(metricType, metricName string) (string, error) {
+	return s.getVal, s.getErr
+}
+func (s *stubMetrics) UpdateGauge(name, value string) error         { return nil }
+func (s *stubMetrics) UpdateCounter(name, value string) error       { return nil }
+func (s *stubMetrics) UpdateMetricJSON(metric *model.Metrics) error { return s.jsonUpdateErr }
+func (s *stubMetrics) GetMetricJSON(metric *model.Metrics) error {
+	if s.jsonGetErr != nil {
+		return s.jsonGetErr
+	}
+	if metric.MType == model.GaugeType {
+		metric.Value = floatPtr(1.23)
+	} else {
+		metric.Delta = intPtr(7)
+	}
+	return nil
+}
+func (s *stubMetrics) UpdateMetricsBatch(metrics []*model.Metrics) error { return s.batchErr }
+func (s *stubMetrics) Ping(ctx context.Context) error                    { return s.pingErr }
+
+func floatPtr(f float64) *float64 { return &f }
+func intPtr(i int64) *int64       { return &i }
 
 func TestServerRoutes(t *testing.T) {
 	ctx := context.Background()
@@ -48,9 +99,10 @@ func TestServerRoutes(t *testing.T) {
 		name          string
 		method        string
 		path          string
-		wantStatus    int
 		wantHeader    string
 		wantHeaderVal string
+
+		wantStatus int
 	}{
 		{
 			name:       "Update gauge - valid",
@@ -117,5 +169,208 @@ func TestServerRoutes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUpdateMetricJSON_InvalidJSON_Returns400(t *testing.T) {
+	stub := &stubMetrics{}
+	srv := NewServer(":0", "k", stub)
+
+	r := srv.GetRouter()
+	req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString("{bad json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestGetMetricJSON_NotFound_404(t *testing.T) {
+	stub := &stubMetrics{jsonGetErr: customerrors.ErrKeyNotFound}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	m := model.Metrics{ID: "nope", MType: model.GaugeType}
+	body, _ := json.Marshal(m)
+
+	req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404", rr.Code)
+	}
+}
+
+func TestGetMetricJSON_OK_HashHeaderSet(t *testing.T) {
+	stub := &stubMetrics{}
+	hashKey := "secret"
+	srv := NewServer(":0", hashKey, stub)
+	r := srv.GetRouter()
+
+	m := model.Metrics{ID: "cpu", MType: model.GaugeType}
+	body, _ := json.Marshal(m)
+
+	req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+	respBody := rr.Body.Bytes()
+	exp := crypto.HashSHA256(respBody, hashKey)
+	if h := rr.Header().Get("HashSHA256"); h != exp && rr.Header().Get("Hash") != exp {
+		t.Fatalf("hash header missing or wrong: got HashSHA256=%q Hash=%q want %q",
+			rr.Header().Get("HashSHA256"), rr.Header().Get("Hash"), exp)
+	}
+}
+
+func TestGzipMiddleware_CompressesWhenAccepted(t *testing.T) {
+	stub := &stubMetrics{list: map[string]string{"a": "1", "b": "2"}}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+	if rr.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", rr.Header().Get("Content-Encoding"))
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(rr.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer zr.Close()
+	if _, err := io.ReadAll(zr); err != nil {
+		t.Fatalf("decompress body: %v", err)
+	}
+}
+
+func TestUpdateMetric_Path_InvalidType_Returns400(t *testing.T) {
+	stub := &stubMetrics{}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/update/unknown/alloc/1", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestUpdateMetric_Path_Gauge_OK(t *testing.T) {
+	stub := &stubMetrics{}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/update/gauge/alloc/123.45", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+}
+
+func TestUpdateMetric_Path_Counter_InvalidNumber_Returns400(t *testing.T) {
+	stub := &counterValidatingStub{}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/update/counter/reqs/notANumber", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestUpdatesBatch_InvalidJSON_400(t *testing.T) {
+	stub := &stubMetrics{}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewBufferString("{bad json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestUpdatesBatch_BadRequestError(t *testing.T) {
+	stub := &stubMetrics{batchErr: io.ErrUnexpectedEOF}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	metrics := []*model.Metrics{{ID: "a", MType: model.GaugeType, Value: floatPtr(1)}}
+	body, _ := json.Marshal(metrics)
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestPing_OK_200(t *testing.T) {
+	stub := &stubMetrics{}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+}
+
+func TestPing_Error_500(t *testing.T) {
+	stub := &stubMetrics{pingErr: io.ErrUnexpectedEOF}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rr.Code)
+	}
+}
+
+func TestGzipMiddleware_NotAppliedWithoutAcceptEncoding(t *testing.T) {
+	stub := &stubMetrics{list: map[string]string{"x": "1"}}
+	srv := NewServer(":0", "k", stub)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Header().Get("Content-Encoding") == "gzip" {
+		t.Fatalf("unexpected gzip without Accept-Encoding")
 	}
 }

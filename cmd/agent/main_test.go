@@ -9,14 +9,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func runParseFlags(t *testing.T, args []string, env map[string]string) (addr string, poll, report time.Duration, hash string, rate int) {
+	t.Helper()
+	for k, v := range env {
+		t.Setenv(k, v)
+	}
+	savedFS := flag.CommandLine
+	savedArgs := os.Args
+	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
+	os.Args = append([]string{"agent"}, args...)
+	defer func() { flag.CommandLine = savedFS; os.Args = savedArgs }()
+
+	addr, poll, report, hash, rate = parseFlags()
+	return
+}
+
 func TestParseFlags(t *testing.T) {
 	tests := []struct {
-		name          string
-		setup         func()
-		wantAddress   string
-		wantPoll      time.Duration
-		wantReport    time.Duration
-		wantHashKey   string
+		setup func()
+
+		name        string
+		wantAddress string
+		wantHashKey string
+
+		wantPoll   time.Duration
+		wantReport time.Duration
+
 		wantRateLimit int
 	}{
 		{
@@ -121,10 +139,11 @@ func TestParseFlags(t *testing.T) {
 
 func TestGetEnvInt(t *testing.T) {
 	tests := []struct {
-		name         string
-		key          string
+		name     string
+		key      string
+		envValue string
+
 		defaultValue int
-		envValue     string
 		want         int
 	}{
 		{
@@ -253,5 +272,64 @@ func TestConvertToModelMetric(t *testing.T) {
 				require.Equal(t, tt.metric.Type, result.MType)
 			}
 		})
+	}
+}
+
+func Test_getEnvInt(t *testing.T) {
+	if got := getEnvInt("AGENT_TEST_INT_X", 42); got != 42 {
+		t.Fatalf("unset -> default: %d, want 42", got)
+	}
+	t.Setenv("AGENT_TEST_INT_X", "17")
+	if got := getEnvInt("AGENT_TEST_INT_X", 42); got != 17 {
+		t.Fatalf("valid env: %d, want 17", got)
+	}
+	t.Setenv("AGENT_TEST_INT_X", "not-a-number")
+	if got := getEnvInt("AGENT_TEST_INT_X", 42); got != 42 {
+		t.Fatalf("invalid env -> default: %d, want 42", got)
+	}
+}
+
+func Test_parseFlags_RateLimit_EnvOnly_NoFlag(t *testing.T) {
+	_, _, _, _, rate := runParseFlags(t, []string{}, map[string]string{"RATE_LIMIT": "15"})
+	if rate != 15 {
+		t.Fatalf("rate=%d, want 15 (from env)", rate)
+	}
+}
+
+func Test_parseFlags_RateLimit_FlagOverridesEnv(t *testing.T) {
+	_, _, _, _, rate := runParseFlags(t, []string{"-l", "33"}, map[string]string{"RATE_LIMIT": "15"})
+	if rate != 33 {
+		t.Fatalf("rate=%d, want 33 (flag override)", rate)
+	}
+}
+
+func Test_parseFlags_HashKey_EnvWhenNoFlag(t *testing.T) {
+	_, _, _, hash, _ := runParseFlags(t, []string{}, map[string]string{"HASH_KEY": "env-secret"})
+	if hash != "env-secret" {
+		t.Fatalf("hash=%q, want %q (ENV)", hash, "env-secret")
+	}
+}
+
+func Test_parseFlags_HashKey_FlagOverridesEnv(t *testing.T) {
+	_, _, _, hash, _ := runParseFlags(t, []string{"-k", "flag-secret"}, map[string]string{"HASH_KEY": "env-secret"})
+	if hash != "flag-secret" {
+		t.Fatalf("hash=%q, want %q (flag override)", hash, "flag-secret")
+	}
+}
+
+func Test_parseFlags_PollAndReport_FromEnvWhenNoFlags(t *testing.T) {
+	addr, poll, report, _, _ := runParseFlags(t, []string{}, map[string]string{"POLL_INTERVAL": "3", "REPORT_INTERVAL": "17", "ADDRESS": "example:9090"})
+	if poll != 3*time.Second || report != 17*time.Second {
+		t.Fatalf("poll/report=%v/%v, want 3s/17s (ENV)", poll, report)
+	}
+	if addr != "example:9090" {
+		t.Fatalf("addr=%q, want %q", addr, "example:9090")
+	}
+}
+
+func Test_parseFlags_PollAndReport_FlagsOverrideEnv(t *testing.T) {
+	_, poll, report, _, _ := runParseFlags(t, []string{"-p", "9", "-r", "21"}, map[string]string{"POLL_INTERVAL": "3", "REPORT_INTERVAL": "17"})
+	if poll != 9*time.Second || report != 21*time.Second {
+		t.Fatalf("poll/report=%v/%v, want 9s/21s (flags)", poll, report)
 	}
 }

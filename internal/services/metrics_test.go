@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Heidric/metrics.git/internal/customerrors"
@@ -15,6 +16,9 @@ type mockStorage struct {
 	counters             map[string]int64
 	updateMetricsBatchFn func(metrics []*model.Metrics) error
 }
+
+func floatPtr(f float64) *float64 { return &f }
+func intPtr(i int64) *int64       { return &i }
 
 func (m *mockStorage) SetGauge(ctx context.Context, name string, value float64) error {
 	m.gauges[name] = value
@@ -140,4 +144,88 @@ func TestMetricsService(t *testing.T) {
 		err := service.Ping(context.Background())
 		assert.NoError(t, err)
 	})
+}
+
+func TestUpdateGauge_InvalidValue_ReturnsErrInvalidValue(t *testing.T) {
+	storage := &mockStorage{gauges: map[string]float64{}}
+	service := NewMetricsService(storage)
+
+	err := service.UpdateGauge("g", "not-a-float")
+	assert.ErrorIs(t, err, customerrors.ErrInvalidValue)
+	_, ok := storage.gauges["g"]
+	assert.False(t, ok, "storage must not be updated on invalid input")
+}
+
+func TestUpdateCounter_InvalidValue_ReturnsErrInvalidValue(t *testing.T) {
+	storage := &mockStorage{counters: map[string]int64{}}
+	service := NewMetricsService(storage)
+
+	err := service.UpdateCounter("c", "not-an-int")
+	assert.ErrorIs(t, err, customerrors.ErrInvalidValue)
+	_, ok := storage.counters["c"]
+	assert.False(t, ok, "storage must not be updated on invalid input")
+}
+
+func TestUpdateMetricJSON_InvalidType(t *testing.T) {
+	storage := &mockStorage{}
+	service := NewMetricsService(storage)
+
+	m := &model.Metrics{ID: "x", MType: "weird"}
+	err := service.UpdateMetricJSON(m)
+	assert.ErrorIs(t, err, customerrors.ErrInvalidType)
+}
+
+func TestGetMetricJSON_InvalidType(t *testing.T) {
+	storage := &mockStorage{}
+	service := NewMetricsService(storage)
+
+	m := &model.Metrics{ID: "x", MType: "nope"}
+	err := service.GetMetricJSON(m)
+	assert.ErrorIs(t, err, customerrors.ErrInvalidType)
+}
+
+func TestUpdateMetricsBatch_FiltersInvalidAndCallsStorage(t *testing.T) {
+	called := 0
+	var got []*model.Metrics
+	storage := &mockStorage{
+		updateMetricsBatchFn: func(metrics []*model.Metrics) error {
+			called++
+			got = metrics
+			return nil
+		},
+	}
+	service := NewMetricsService(storage)
+
+	in := []*model.Metrics{
+		{ID: "a", MType: model.GaugeType, Value: floatPtr(1)},
+		{ID: "b", MType: "unknown"},
+		{ID: "c", MType: model.CounterType, Delta: intPtr(5)},
+	}
+
+	err := service.UpdateMetricsBatch(in)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, called, "storage should be called exactly once")
+	assert.Len(t, got, 2, "only two valid metrics must pass through")
+	assert.Equal(t, "a", got[0].ID)
+	assert.Equal(t, "c", got[1].ID)
+}
+
+func TestUpdateMetricsBatch_AllInvalid_NoCall(t *testing.T) {
+	called := 0
+	storage := &mockStorage{
+		updateMetricsBatchFn: func(metrics []*model.Metrics) error {
+			called++
+			return errors.New("should not be called")
+		},
+	}
+	service := NewMetricsService(storage)
+
+	in := []*model.Metrics{
+		{ID: "a", MType: "nope"},
+		{ID: "b", MType: "also-nope"},
+	}
+
+	err := service.UpdateMetricsBatch(in)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, called, "storage must not be called when all invalid")
 }

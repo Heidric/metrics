@@ -34,9 +34,9 @@ type Metrics interface {
 // NewServer and run the embedded *http.Server.
 type Server struct {
 	Srv     *http.Server
-	hashKey string
-	metrics Metrics
 	logger  *zerolog.Logger
+	metrics Metrics
+	hashKey string
 }
 
 type gzipResponseWriter struct {

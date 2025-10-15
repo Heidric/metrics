@@ -26,16 +26,18 @@ type MetricsStorage interface {
 
 // Store is an in-memory metrics store with optional file persistence.
 type Store struct {
-	mu            sync.RWMutex
+	ticker        *time.Ticker
 	gauges        map[string]float64
 	counters      map[string]int64
+	closeChan     chan struct{}
 	filePath      string
 	storeInterval time.Duration
-	syncMode      bool
-	saveMutex     sync.Mutex
-	ticker        *time.Ticker
-	closeChan     chan struct{}
-	closed        bool
+
+	syncMode bool
+	closed   bool
+
+	mu        sync.RWMutex
+	saveMutex sync.Mutex
 }
 
 // NewStore constructs an in-memory store with optional persistence.
