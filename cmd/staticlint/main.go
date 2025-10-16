@@ -49,17 +49,14 @@ import (
 func main() {
 	var analyzers []*analysis.Analyzer
 
-	for _, a := range []*analysis.Analyzer{
+	analyzers = append(analyzers,
 		asmdecl.Analyzer, assign.Analyzer, atomic.Analyzer, bools.Analyzer, buildssa.Analyzer,
 		cgocall.Analyzer, composite.Analyzer, copylock.Analyzer, deepequalerrors.Analyzer,
 		errorsas.Analyzer, fieldalignment.Analyzer, httpresponse.Analyzer, loopclosure.Analyzer,
 		lostcancel.Analyzer, nilfunc.Analyzer, nilness.Analyzer, printf.Analyzer, shadow.Analyzer,
 		sortslice.Analyzer, stdmethods.Analyzer, stringintconv.Analyzer, structtag.Analyzer,
 		testinggoroutine.Analyzer, tests.Analyzer, unmarshal.Analyzer, unreachable.Analyzer,
-		unsafeptr.Analyzer, unusedresult.Analyzer,
-	} {
-		analyzers = append(analyzers, a)
-	}
+		unsafeptr.Analyzer, unusedresult.Analyzer)
 
 	for _, a := range staticcheck.Analyzers {
 		if len(a.Analyzer.Name) >= 2 && a.Analyzer.Name[:2] == "SA" {

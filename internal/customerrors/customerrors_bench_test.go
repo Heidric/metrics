@@ -6,8 +6,9 @@ import (
 )
 
 type noopWriter struct {
-	code   int
 	header http.Header
+
+	code int
 }
 
 func (w *noopWriter) Header() http.Header {
