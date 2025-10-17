@@ -1,17 +1,28 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 
+	"github.com/Heidric/metrics.git/internal/crypto"
+	"github.com/Heidric/metrics.git/internal/customerrors"
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
+	"github.com/Heidric/metrics.git/internal/model"
+	"github.com/Heidric/metrics.git/internal/server/servertest"
 	"github.com/Heidric/metrics.git/internal/services"
 	"github.com/rs/zerolog"
 )
+
+func floatPtr(f float64) *float64 { return &f }
 
 func TestServerRoutes(t *testing.T) {
 	ctx := context.Background()
@@ -48,9 +59,10 @@ func TestServerRoutes(t *testing.T) {
 		name          string
 		method        string
 		path          string
-		wantStatus    int
 		wantHeader    string
 		wantHeaderVal string
+
+		wantStatus int
 	}{
 		{
 			name:       "Update gauge - valid",
@@ -117,5 +129,242 @@ func TestServerRoutes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUpdateMetricJSON_InvalidJSON_Returns400(t *testing.T) {
+	mock := servertest.NewMetricsMock()
+	srv := NewServer(":0", "k", mock)
+
+	r := srv.GetRouter()
+	req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString("{bad json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestGetMetricJSON_NotFound_404(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithGetMetricJSON(func(m *model.Metrics) error {
+			return customerrors.ErrKeyNotFound
+		}),
+	)
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	body, _ := json.Marshal(model.Metrics{ID: "nope", MType: model.GaugeType})
+
+	req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404", rr.Code)
+	}
+}
+
+func TestGetMetricJSON_OK_HashHeaderSet(t *testing.T) {
+	hashKey := "secret"
+	mock := servertest.NewMetricsMock(
+		servertest.WithGetMetricJSON(func(m *model.Metrics) error {
+			if m.MType == model.GaugeType {
+				v := 1.23
+				m.Value = &v
+			} else {
+				d := int64(7)
+				m.Delta = &d
+			}
+			return nil
+		}),
+	)
+	srv := NewServer(":0", hashKey, mock)
+	r := srv.GetRouter()
+
+	m := model.Metrics{ID: "cpu", MType: model.GaugeType}
+	body, _ := json.Marshal(m)
+
+	req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+	respBody := rr.Body.Bytes()
+	exp := crypto.HashSHA256(respBody, hashKey)
+	if h := rr.Header().Get("HashSHA256"); h != exp && rr.Header().Get("Hash") != exp {
+		t.Fatalf("hash header missing or wrong: got HashSHA256=%q Hash=%q want %q",
+			rr.Header().Get("HashSHA256"), rr.Header().Get("Hash"), exp)
+	}
+}
+
+func TestGzipMiddleware_CompressesWhenAccepted(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithListMetrics(func() map[string]string { return map[string]string{"a": "1", "b": "2"} }),
+	)
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+	if rr.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", rr.Header().Get("Content-Encoding"))
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(rr.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer zr.Close()
+	if _, err := io.ReadAll(zr); err != nil {
+		t.Fatalf("decompress body: %v", err)
+	}
+}
+
+func TestUpdateMetric_Path_InvalidType_Returns400(t *testing.T) {
+	mock := servertest.NewMetricsMock()
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/update/unknown/alloc/1", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestUpdateMetric_Path_Gauge_OK(t *testing.T) {
+	mock := servertest.NewMetricsMock()
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/update/gauge/alloc/123.45", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+}
+
+func TestUpdateMetric_Path_Counter_InvalidNumber_Returns400(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithUpdateCounter(func(name, value string) error {
+			if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+				return customerrors.ErrInvalidValue
+			}
+			return nil
+		}),
+	)
+
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/update/counter/reqs/notANumber", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestUpdatesBatch_InvalidJSON_400(t *testing.T) {
+	mock := servertest.NewMetricsMock()
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewBufferString("{bad json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestUpdatesBatch_BadRequestError(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithUpdateMetricsBatch(func(_ []*model.Metrics) error {
+			return io.ErrUnexpectedEOF
+		}),
+	)
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	metrics := []*model.Metrics{{ID: "a", MType: model.GaugeType, Value: floatPtr(1)}}
+	body, _ := json.Marshal(metrics)
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestPing_OK_200(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithPing(func(ctx context.Context) error { return nil }),
+	)
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rr.Code)
+	}
+}
+
+func TestPing_Error_500(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithPing(func(ctx context.Context) error { return io.ErrUnexpectedEOF }),
+	)
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rr.Code)
+	}
+}
+
+func TestGzipMiddleware_NotAppliedWithoutAcceptEncoding(t *testing.T) {
+	mock := servertest.NewMetricsMock(
+		servertest.WithListMetrics(func() map[string]string { return map[string]string{"x": "1"} }),
+	)
+	srv := NewServer(":0", "k", mock)
+	r := srv.GetRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+	if rr.Header().Get("Content-Encoding") == "gzip" {
+		t.Fatalf("unexpected gzip without Accept-Encoding")
 	}
 }

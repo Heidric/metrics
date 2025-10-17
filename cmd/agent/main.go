@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
 	"github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -46,30 +48,30 @@ type MetricJob struct {
 // Agent periodically collects runtime/system metrics and reports them to the server.
 // Concurrency: collection and reporting run in goroutines; channels coordinate work.
 type Agent struct {
-	serverURL      string
+	serverURL string
+	hashKey   string
+
+	client         *http.Client
+	jobChan        chan MetricJob // inbound jobs for the worker pool
+	resultChan     chan error     // reporting results (nil on success)
+	stopChan       chan struct{}  // signals all goroutines to stop
+	runtimeMetrics []Metric       // cached runtime metrics snapshot
+	systemMetrics  []Metric       // cached system metrics snapshot
+
 	pollInterval   time.Duration
 	reportInterval time.Duration
-	hashKey        string
-	rateLimit      int
-	client         *http.Client
+	pollCountDelta int64 // aggregate delta for counter-type metrics
 
-	jobChan    chan MetricJob // inbound jobs for the worker pool
-	resultChan chan error     // reporting results (nil on success)
+	rateLimit int
 
-	runtimeMetrics []Metric // cached runtime metrics snapshot
-	systemMetrics  []Metric // cached system metrics snapshot
-	pollCountDelta int64    // aggregate delta for counter-type metrics
-
-	mu       sync.RWMutex   // guards runtime/system metric caches and counters
-	stopChan chan struct{}  // signals all goroutines to stop
-	wg       sync.WaitGroup // waits for collectors/reporters to exit
+	mu sync.RWMutex   // guards runtime/system metric caches and counters
+	wg sync.WaitGroup // waits for collectors/reporters to exit
 }
 
 func parseFlags() (string, time.Duration, time.Duration, string, int) {
 	config, err := cfg.NewConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error loading config: %v\n", err)
 	}
 
 	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")
@@ -399,6 +401,8 @@ func (a *Agent) convertToModelMetric(m Metric) *model.Metrics {
 }
 
 func main() {
+	buildinfo.PrintStdout()
+
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	logger.Log = &log
 

@@ -17,8 +17,9 @@ var (
 // It carries the HTTP status and a human-readable title/detail.
 type CommonError struct {
 	Title   string `json:"title"`
-	Status  int    `json:"status"`
 	Details string `json:"detail"`
+
+	Status int `json:"status"`
 }
 
 // WriteError writes a JSON error response with the given HTTP status code.

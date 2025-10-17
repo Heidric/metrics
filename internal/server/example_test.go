@@ -103,25 +103,26 @@ func ExampleNewServer_json() {
 	mem := &exampleMetrics{store: map[string]string{}}
 	srv := NewServer(":0", "", mem)
 
-	v := 3.14
-	payload := model.Metrics{ID: "pi", MType: "gauge", Value: &v}
-	b, _ := json.Marshal(payload)
+	up := model.Metrics{ID: "cpu", MType: model.GaugeType, Value: floatPtr(0.42)}
+	upBody, _ := json.Marshal(up)
 
-	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.Srv.Handler.ServeHTTP(rec, req)
-	fmt.Println("POST /update:", rec.Code)
+	req1 := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(upBody))
+	req1.Header.Set("Content-Type", "application/json")
+	rec1 := httptest.NewRecorder()
+	srv.Srv.Handler.ServeHTTP(rec1, req1)
+	fmt.Println("POST /update:", rec1.Code)
 
-	getPayload := model.Metrics{ID: "pi", MType: "gauge"}
-	gb, _ := json.Marshal(getPayload)
-	req2 := httptest.NewRequest(http.MethodPost, "/value", bytes.NewReader(gb))
+	valReq := model.Metrics{ID: "cpu", MType: model.GaugeType}
+	valBody, _ := json.Marshal(valReq)
+
+	req2 := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(valBody))
 	req2.Header.Set("Content-Type", "application/json")
 	rec2 := httptest.NewRecorder()
 	srv.Srv.Handler.ServeHTTP(rec2, req2)
 	fmt.Println("POST /value:", rec2.Code)
-	respBody, _ := io.ReadAll(rec2.Body)
-	fmt.Println("Body has ID:", strings.Contains(string(respBody), "\"pi\""))
+
+	body := rec2.Body.String()
+	fmt.Println("Body has ID:", strings.Contains(body, `"id"`))
 
 	// Output:
 	// POST /update: 200

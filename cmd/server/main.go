@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -21,14 +22,16 @@ import (
 // It embeds cfg.Config (shared service settings) and carries CLI flag values
 // parsed in main before they are merged into the final runtime config.
 type Config struct {
+	flagAddress         string // listen address from flag (e.g., ":8080")
+	flagFileStoragePath string // path to JSON file for on-disk persistence
+	flagDatabaseDSN     string // PostgreSQL DSN; when set, enables DB-backed storage
+	flagHashKey         string // HMAC key used by hash middleware and related logic
+
 	cfg.Config
 
-	flagAddress         string        // listen address from flag (e.g., ":8080")
-	flagFileStoragePath string        // path to JSON file for on-disk persistence
-	flagStoreInterval   time.Duration // interval for periodic persistence; 0 => sync on each update
-	flagRestore         bool          // restore state from file on startup
-	flagDatabaseDSN     string        // PostgreSQL DSN; when set, enables DB-backed storage
-	flagHashKey         string        // HMAC key used by hash middleware and related logic
+	flagStoreInterval time.Duration // interval for periodic persistence; 0 => sync on each update
+
+	flagRestore bool // restore state from file on startup
 }
 
 func loadConfig() (*Config, error) {
@@ -57,7 +60,13 @@ func loadConfig() (*Config, error) {
 	if config.flagStoreInterval != 0 {
 		config.StoreInterval = config.flagStoreInterval
 	}
-	if flag.Lookup("r") != nil && flag.Lookup("r").Value.String() != "" {
+	var restoreSet bool
+	flag.CommandLine.Visit(func(f *flag.Flag) {
+		if f.Name == "r" {
+			restoreSet = true
+		}
+	})
+	if restoreSet {
 		config.Restore = config.flagRestore
 	}
 	if config.flagDatabaseDSN != "" {
@@ -71,6 +80,8 @@ func loadConfig() (*Config, error) {
 }
 
 func main() {
+	buildinfo.PrintStdout()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 

@@ -49,6 +49,7 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 // computing the hash and writes the buffered body.
 func (w *hashResponseWriter) WriteHeader(code int) {
 	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
 }
 
 // Write appends bytes to the internal buffer; the real write happens after
