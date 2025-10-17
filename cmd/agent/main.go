@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
 	"github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -28,27 +29,6 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 )
-
-var (
-	buildVersion string
-	buildDate    string
-	buildCommit  string
-)
-
-func printBuildInfo() {
-	if buildVersion == "" {
-		buildVersion = "N/A"
-	}
-	if buildDate == "" {
-		buildDate = "N/A"
-	}
-	if buildCommit == "" {
-		buildCommit = "N/A"
-	}
-	fmt.Println("Build version:", buildVersion)
-	fmt.Println("Build date:", buildDate)
-	fmt.Println("Build commit:", buildCommit)
-}
 
 // Metric is a name/type/value object collected by the agent
 // before it is converted into the model.Metrics.
@@ -80,7 +60,7 @@ type Agent struct {
 
 	pollInterval   time.Duration
 	reportInterval time.Duration
-	pollCountDelta int64         // aggregate delta for counter-type metrics
+	pollCountDelta int64 // aggregate delta for counter-type metrics
 
 	rateLimit int
 
@@ -421,7 +401,7 @@ func (a *Agent) convertToModelMetric(m Metric) *model.Metrics {
 }
 
 func main() {
-	printBuildInfo()
+	buildinfo.PrintStdout()
 
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	logger.Log = &log

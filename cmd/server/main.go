@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
@@ -17,27 +17,6 @@ import (
 	"github.com/Heidric/metrics.git/internal/services"
 	"golang.org/x/sync/errgroup"
 )
-
-var (
-	buildVersion string
-	buildDate    string
-	buildCommit  string
-)
-
-func printBuildInfo() {
-	if buildVersion == "" {
-		buildVersion = "N/A"
-	}
-	if buildDate == "" {
-		buildDate = "N/A"
-	}
-	if buildCommit == "" {
-		buildCommit = "N/A"
-	}
-	fmt.Println("Build version:", buildVersion)
-	fmt.Println("Build date:", buildDate)
-	fmt.Println("Build commit:", buildCommit)
-}
 
 // Config aggregates runtime configuration for the server command.
 // It embeds cfg.Config (shared service settings) and carries CLI flag values
@@ -101,7 +80,7 @@ func loadConfig() (*Config, error) {
 }
 
 func main() {
-	printBuildInfo()
+	buildinfo.PrintStdout()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
