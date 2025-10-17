@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,11 +24,18 @@ import (
 	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
 	"github.com/Heidric/metrics.git/internal/crypto"
+	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/rs/zerolog"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+)
+
+var (
+	flagCryptoKey string // flag holder
+	cryptoKeyPath string // effective path (flag > env)
+	agentPubKey   *rsa.PublicKey
 )
 
 // Metric is a name/type/value object collected by the agent
@@ -68,6 +76,21 @@ type Agent struct {
 	wg sync.WaitGroup // waits for collectors/reporters to exit
 }
 
+func encrypt(body []byte) (out []byte, encrypted bool, err error) {
+	if agentPubKey == nil {
+		return body, false, nil
+	}
+	env, err := intcrypto.EncryptFor(agentPubKey, body)
+	if err != nil {
+		return nil, false, err
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return nil, false, err
+	}
+	return b, true, nil
+}
+
 func parseFlags() (string, time.Duration, time.Duration, string, int) {
 	config, err := cfg.NewConfig()
 	if err != nil {
@@ -80,8 +103,15 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 	databaseDSN := flag.String("d", config.DatabaseDSN, "Database DSN")
 	hashKey := flag.String("k", config.HashKey, "Hash key")
 	rateLimit := flag.Int("l", getEnvInt("RATE_LIMIT", 10), "Rate limit for concurrent requests")
+	flag.StringVar(&flagCryptoKey, "crypto-key", "", "path to RSA public key (PEM)")
 
 	flag.Parse()
+
+	if flagCryptoKey != "" {
+		cryptoKeyPath = flagCryptoKey
+	} else if v := os.Getenv("CRYPTO_KEY"); v != "" {
+		cryptoKeyPath = v
+	}
 
 	if *databaseDSN != "" {
 		config.DatabaseDSN = *databaseDSN
@@ -219,7 +249,23 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
 
-	compressed, err := a.compressData(data)
+	payload := data
+	encrypted := false
+	if agentPubKey != nil {
+		encBody, enc, err := encrypt(data)
+		if err != nil {
+			return fmt.Errorf("encryption failed: %w", err)
+		}
+		payload = encBody
+		encrypted = enc
+	}
+
+	if a.hashKey != "" {
+		hash := crypto.HashSHA256(payload, a.hashKey)
+		_ = hash
+	}
+
+	compressed, err := a.compressData(payload)
 	if err != nil {
 		return fmt.Errorf("failed to compress data: %w", err)
 	}
@@ -230,9 +276,12 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	if encrypted {
+		req.Header.Set("X-Encrypted", "1")
+	}
+
 	if a.hashKey != "" {
-		hash := crypto.HashSHA256(data, a.hashKey)
-		req.Header.Set("HashSHA256", hash)
+		req.Header.Set("HashSHA256", crypto.HashSHA256(payload, a.hashKey))
 	}
 
 	resp, err := withRetryHTTP(a.client, req)
@@ -244,7 +293,6 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %s", resp.Status)
 	}
-
 	return nil
 }
 
@@ -407,6 +455,14 @@ func main() {
 	logger.Log = &log
 
 	serverAddr, pollInterval, reportInterval, hashKey, rateLimit := parseFlags()
+
+	if cryptoKeyPath != "" {
+		k, err := crypto.ParseRSAPublicKeyPEM(cryptoKeyPath)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to load RSA public key")
+		}
+		agentPubKey = k
+	}
 
 	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey, rateLimit)
 	agent.Run()

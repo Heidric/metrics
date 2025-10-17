@@ -17,6 +17,7 @@ type Config struct {
 	FileStoragePath string
 	DatabaseDSN     string
 	HashKey         string
+	CryptoKeyPath   string
 
 	PollInterval   time.Duration
 	ReportInterval time.Duration
@@ -41,6 +42,7 @@ func NewConfig() (*Config, error) {
 	config.Restore = parseBool("RESTORE", true)
 	config.DatabaseDSN = getEnv("DATABASE_DSN", "")
 	config.HashKey = getEnv("HASH_KEY", "")
+	config.CryptoKeyPath = getEnv("CRYPTO_KEY", "")
 
 	config.Logger.SetDefault()
 	return config, nil

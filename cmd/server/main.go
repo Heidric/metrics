@@ -11,6 +11,7 @@ import (
 
 	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
+	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/db"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/server"
@@ -26,6 +27,7 @@ type Config struct {
 	flagFileStoragePath string // path to JSON file for on-disk persistence
 	flagDatabaseDSN     string // PostgreSQL DSN; when set, enables DB-backed storage
 	flagHashKey         string // HMAC key used by hash middleware and related logic
+	flagCryptoKey       string // path to RSA private key (PEM)
 
 	cfg.Config
 
@@ -48,6 +50,7 @@ func loadConfig() (*Config, error) {
 	flag.BoolVar(&config.flagRestore, "r", true, "restore data from file")
 	flag.StringVar(&config.flagDatabaseDSN, "d", "", "database DSN")
 	flag.StringVar(&config.flagHashKey, "k", "", "hash key")
+	flag.StringVar(&config.flagCryptoKey, "crypto-key", "", "path to RSA private key (PEM)")
 
 	flag.Parse()
 
@@ -74,6 +77,9 @@ func loadConfig() (*Config, error) {
 	}
 	if config.flagHashKey != "" {
 		config.HashKey = config.flagHashKey
+	}
+	if config.flagCryptoKey == "" {
+		config.CryptoKeyPath = config.flagCryptoKey
 	}
 
 	return config, nil
@@ -114,8 +120,17 @@ func main() {
 		logger.Zerolog().Info().Msg("Using file storage")
 	}
 
+	var opts []server.Option
+	if config.CryptoKeyPath != "" {
+		pkey, err := intcrypto.ParseRSAPrivateKeyPEM(config.CryptoKeyPath)
+		if err != nil {
+			logger.Zerolog().Error().Err(err).Msg("failed to load RSA private key")
+		}
+		opts = append(opts, server.WithPrivateKey(pkey))
+	}
+
 	metrics := services.NewMetricsService(storage)
-	server := server.NewServer(config.ServerAddress, config.HashKey, metrics)
+	server := server.NewServer(config.ServerAddress, config.HashKey, metrics, opts...)
 	server.Run(ctx, runner)
 
 	if config.DatabaseDSN == "" && config.StoreInterval > 0 {

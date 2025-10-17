@@ -3,6 +3,7 @@ package server
 import (
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"io"
 	"net/http"
 	"strings"
@@ -33,10 +34,17 @@ type Metrics interface {
 // Handlers expose read/update operations and a health endpoint. Construct via
 // NewServer and run the embedded *http.Server.
 type Server struct {
-	Srv     *http.Server
-	logger  *zerolog.Logger
-	metrics Metrics
-	hashKey string
+	Srv        *http.Server
+	logger     *zerolog.Logger
+	metrics    Metrics
+	hashKey    string
+	privateKey *rsa.PrivateKey
+}
+
+type Option func(*Server)
+
+func WithPrivateKey(k *rsa.PrivateKey) Option {
+	return func(s *Server) { s.privateKey = k }
 }
 
 type gzipResponseWriter struct {
@@ -54,7 +62,7 @@ func (g gzipResponseWriter) Write(b []byte) (int, error) {
 //   - addr: listen address (e.g. ":8080")
 //   - hashKey: key used by middleware that sign/verify payloads
 //   - metrics: storage implementation backing the handlers
-func NewServer(addr string, hashKey string, metrics Metrics) *Server {
+func NewServer(addr string, hashKey string, metrics Metrics, opts ...Option) *Server {
 	logger := zerolog.Nop()
 
 	r := chi.NewRouter()
@@ -63,6 +71,9 @@ func NewServer(addr string, hashKey string, metrics Metrics) *Server {
 		hashKey: hashKey,
 		metrics: metrics,
 		logger:  &logger,
+	}
+	for _, o := range opts {
+		o(s)
 	}
 
 	r.Use(s.gzipMiddleware)
