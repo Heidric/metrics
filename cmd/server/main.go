@@ -43,7 +43,6 @@ func loadConfig() (*Config, error) {
 	}
 
 	config := &Config{Config: *baseCfg}
-
 	flag.StringVar(&config.flagAddress, "a", "", "HTTP server endpoint address")
 	flag.StringVar(&config.flagFileStoragePath, "f", "", "file storage path")
 	flag.DurationVar(&config.flagStoreInterval, "i", 0, "store interval in seconds")
@@ -51,6 +50,8 @@ func loadConfig() (*Config, error) {
 	flag.StringVar(&config.flagDatabaseDSN, "d", "", "database DSN")
 	flag.StringVar(&config.flagHashKey, "k", "", "hash key")
 	flag.StringVar(&config.flagCryptoKey, "crypto-key", "", "path to RSA private key (PEM)")
+	flag.String("config", "", "path to JSON config file")
+	flag.String("c", "", "path to JSON config file (shorthand)")
 
 	flag.Parse()
 
@@ -78,7 +79,7 @@ func loadConfig() (*Config, error) {
 	if config.flagHashKey != "" {
 		config.HashKey = config.flagHashKey
 	}
-	if config.flagCryptoKey == "" {
+	if config.flagCryptoKey != "" {
 		config.CryptoKeyPath = config.flagCryptoKey
 	}
 
@@ -132,36 +133,4 @@ func main() {
 	metrics := services.NewMetricsService(storage)
 	server := server.NewServer(config.ServerAddress, config.HashKey, metrics, opts...)
 	server.Run(ctx, runner)
-
-	if config.DatabaseDSN == "" && config.StoreInterval > 0 {
-		ticker := time.NewTicker(config.StoreInterval)
-		runner.Go(func() error {
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					if err := storage.(*db.Store).SaveToFile(); err != nil {
-						logger.Zerolog().Error().Err(err).Msg("Failed to save data to file")
-					}
-				case <-ctx.Done():
-					return nil
-				}
-			}
-		})
-	}
-
-	runner.Go(func() error {
-		<-ctx.Done()
-		if config.DatabaseDSN == "" {
-			if err := storage.(*db.Store).SaveToFile(); err != nil {
-				logger.Zerolog().Error().Err(err).Msg("Failed to save data to file on shutdown")
-			}
-		}
-		if err := storage.Close(); err != nil {
-			logger.Zerolog().Error().Err(err).Msg("Failed to close storage")
-		}
-		return server.Shutdown(ctx)
-	})
-
-	runner.Wait()
 }

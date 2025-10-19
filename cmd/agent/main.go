@@ -97,6 +97,8 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 		log.Fatalf("Error loading config: %v\n", err)
 	}
 
+	flag.String("config", "", "path to JSON config file")
+	flag.String("c", "", "path to JSON config file (shorthand)")
 	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")
 	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
 	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
