@@ -149,6 +149,7 @@ func TestServer_GracefulShutdown_WaitsInFlightAndPersists(t *testing.T) {
 			postDone <- &http.Response{StatusCode: 0}
 			return
 		}
+		defer resp.Body.Close()
 		postDone <- resp
 	}()
 

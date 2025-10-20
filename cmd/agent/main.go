@@ -23,7 +23,6 @@ import (
 
 	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
-	"github.com/Heidric/metrics.git/internal/crypto"
 	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
@@ -254,8 +253,8 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	payload := data
 	encrypted := false
 	if agentPubKey != nil {
-		encBody, enc, err := encrypt(data)
-		if err != nil {
+		encBody, enc, encErr := encrypt(data)
+		if encErr != nil {
 			return fmt.Errorf("encryption failed: %w", err)
 		}
 		payload = encBody
@@ -263,7 +262,7 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	}
 
 	if a.hashKey != "" {
-		hash := crypto.HashSHA256(payload, a.hashKey)
+		hash := intcrypto.HashSHA256(payload, a.hashKey)
 		_ = hash
 	}
 
@@ -283,7 +282,7 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	}
 
 	if a.hashKey != "" {
-		req.Header.Set("HashSHA256", crypto.HashSHA256(payload, a.hashKey))
+		req.Header.Set("HashSHA256", intcrypto.HashSHA256(payload, a.hashKey))
 	}
 
 	resp, err := withRetryHTTP(a.client, req)
@@ -459,7 +458,7 @@ func main() {
 	serverAddr, pollInterval, reportInterval, hashKey, rateLimit := parseFlags()
 
 	if cryptoKeyPath != "" {
-		k, err := crypto.ParseRSAPublicKeyPEM(cryptoKeyPath)
+		k, err := intcrypto.ParseRSAPublicKeyPEM(cryptoKeyPath)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to load RSA public key")
 		}

@@ -32,7 +32,7 @@ func (s *Server) decryptJSON(w http.ResponseWriter, r *http.Request) (*http.Requ
 		return r, err
 	}
 	_ = r.Body.Close()
-	if err := json.Unmarshal(raw, &env); err != nil {
+	if err = json.Unmarshal(raw, &env); err != nil {
 		return r, err
 	}
 	pt, err := intcrypto.DecryptWith(s.privateKey, &env)
