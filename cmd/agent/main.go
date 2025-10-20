@@ -466,12 +466,14 @@ func main() {
 		agentPubKey = k
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer stop()
+
 	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey, rateLimit)
-	agent.Run()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
+	go agent.Run()
 
+	<-ctx.Done()
 	agent.Stop()
 }

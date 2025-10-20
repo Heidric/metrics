@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"log"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -89,7 +88,8 @@ func loadConfig() (*Config, error) {
 func main() {
 	buildinfo.PrintStdout()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	runner, ctx := errgroup.WithContext(ctx)
@@ -131,6 +131,24 @@ func main() {
 	}
 
 	metrics := services.NewMetricsService(storage)
-	server := server.NewServer(config.ServerAddress, config.HashKey, metrics, opts...)
-	server.Run(ctx, runner)
+	srv := server.NewServer(config.ServerAddress, config.HashKey, metrics, opts...)
+	srv.Run(ctx, runner)
+
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Zerolog().Error().Err(err).Msg("server shutdown error")
+	}
+
+	if closer, ok := storage.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			logger.Zerolog().Error().Err(err).Msg("storage close error")
+		}
+	}
+
+	if err := runner.Wait(); err != nil {
+		logger.Zerolog().Error().Err(err).Msg("server background error")
+	}
 }

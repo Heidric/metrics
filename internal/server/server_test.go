@@ -23,6 +23,7 @@ import (
 )
 
 func floatPtr(f float64) *float64 { return &f }
+func int64Ptr(v int64) *int64     { return &v }
 
 func TestServerRoutes(t *testing.T) {
 	ctx := context.Background()
