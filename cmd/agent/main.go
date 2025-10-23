@@ -71,8 +71,9 @@ type Agent struct {
 
 	rateLimit int
 
-	mu sync.RWMutex   // guards runtime/system metric caches and counters
-	wg sync.WaitGroup // waits for collectors/reporters to exit
+	mu     sync.RWMutex   // guards runtime/system metric caches and counters
+	wg     sync.WaitGroup // waits for collectors/reporters to exit
+	cancel context.CancelFunc
 }
 
 func encrypt(body []byte) (out []byte, encrypted bool, err error) {
@@ -175,7 +176,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hash
 // It returns immediately; goroutines keep running until Stop is called.
 func (a *Agent) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	a.cancel = cancel
 
 	a.startWorkerPool(ctx)
 
@@ -185,12 +186,17 @@ func (a *Agent) Run() {
 	go a.reportMetrics()
 
 	go a.processResults()
+
+	<-a.stopChan
 }
 
 // Stop signals all goroutines to exit and waits for them to finish.
 // Channels are closed after all workers have drained.
 func (a *Agent) Stop() {
 	close(a.stopChan)
+	if a.cancel != nil {
+		a.cancel()
+	}
 	a.wg.Wait()
 	close(a.jobChan)
 	close(a.resultChan)
