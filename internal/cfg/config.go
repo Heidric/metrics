@@ -164,7 +164,9 @@ func NewConfig() (*Config, error) {
 
 	cfgPath := pickConfigPathFromArgs(os.Args)
 	if cfgPath == "" {
-		cfgPath = os.Getenv("CONFIG")
+		if v, ok := os.LookupEnv("CONFIG"); ok {
+			cfgPath = v
+		}
 	}
 
 	var fc *fileConfig

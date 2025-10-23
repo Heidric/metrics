@@ -109,9 +109,10 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 
 	flag.Parse()
 
+	// Prefer flag; otherwise accept explicit env override including empty string.
 	if flagCryptoKey != "" {
 		cryptoKeyPath = flagCryptoKey
-	} else if v := os.Getenv("CRYPTO_KEY"); v != "" {
+	} else if v, ok := os.LookupEnv("CRYPTO_KEY"); ok {
 		cryptoKeyPath = v
 	}
 
@@ -123,9 +124,9 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 }
 
 func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
 		}
 	}
 	return defaultValue
