@@ -2,6 +2,8 @@ package cfg
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -80,16 +82,31 @@ func normalizePath(p string) string {
 func loadFileConfig(path string) (*fileConfig, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open config file %q: %w", path, err)
 	}
-	defer f.Close()
 
+	var retErr error
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			cerr = fmt.Errorf("close config file %q: %w", path, cerr)
+			if retErr != nil {
+				retErr = errors.Join(retErr, cerr)
+			} else {
+				retErr = cerr
+			}
+		}
+	}()
+
+	var cfg fileConfig
 	dec := json.NewDecoder(f)
-	var fc fileConfig
-	if err := dec.Decode(&fc); err != nil {
-		return nil, err
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(&cfg); err != nil {
+		retErr = fmt.Errorf("decode config file %q: %w", path, err)
+		return nil, retErr
 	}
-	return &fc, nil
+
+	return &cfg, retErr
 }
 
 // isAllDigits reports whether s contains only ASCII digits 0-9.
