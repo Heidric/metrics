@@ -140,7 +140,7 @@ func TestLoadConfig_DSN_FlagOverridesEnv(t *testing.T) {
 func TestLoadConfig_FileStoragePath_EnvWhenNoFlag(t *testing.T) {
 	cfg := runLoadConfigWithArgs(t,
 		[]string{},
-		map[string]string{"FILE_STORAGE_PATH": "/var/lib/metrics.json"},
+		map[string]string{"STORE_FILE": "/var/lib/metrics.json"},
 	)
 	if cfg.FileStoragePath != "/var/lib/metrics.json" {
 		t.Fatalf("FileStoragePath=%q, want %q (ENV)", cfg.FileStoragePath, "/var/lib/metrics.json")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,12 +23,18 @@ import (
 
 	"github.com/Heidric/metrics.git/internal/buildinfo"
 	"github.com/Heidric/metrics.git/internal/cfg"
-	"github.com/Heidric/metrics.git/internal/crypto"
+	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/rs/zerolog"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+)
+
+var (
+	flagCryptoKey string // flag holder
+	cryptoKeyPath string // effective path (flag > env)
+	agentPubKey   *rsa.PublicKey
 )
 
 // Metric is a name/type/value object collected by the agent
@@ -64,8 +71,24 @@ type Agent struct {
 
 	rateLimit int
 
-	mu sync.RWMutex   // guards runtime/system metric caches and counters
-	wg sync.WaitGroup // waits for collectors/reporters to exit
+	mu     sync.RWMutex   // guards runtime/system metric caches and counters
+	wg     sync.WaitGroup // waits for collectors/reporters to exit
+	cancel context.CancelFunc
+}
+
+func encrypt(body []byte) (out []byte, encrypted bool, err error) {
+	if agentPubKey == nil {
+		return body, false, nil
+	}
+	env, err := intcrypto.EncryptFor(agentPubKey, body)
+	if err != nil {
+		return nil, false, err
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return nil, false, err
+	}
+	return b, true, nil
 }
 
 func parseFlags() (string, time.Duration, time.Duration, string, int) {
@@ -74,14 +97,24 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 		log.Fatalf("Error loading config: %v\n", err)
 	}
 
+	flag.String("config", "", "path to JSON config file")
+	flag.String("c", "", "path to JSON config file (shorthand)")
 	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")
 	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
 	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
 	databaseDSN := flag.String("d", config.DatabaseDSN, "Database DSN")
 	hashKey := flag.String("k", config.HashKey, "Hash key")
 	rateLimit := flag.Int("l", getEnvInt("RATE_LIMIT", 10), "Rate limit for concurrent requests")
+	flag.StringVar(&flagCryptoKey, "crypto-key", "", "path to RSA public key (PEM)")
 
 	flag.Parse()
+
+	// Prefer flag; otherwise accept explicit env override including empty string.
+	if flagCryptoKey != "" {
+		cryptoKeyPath = flagCryptoKey
+	} else if v, ok := os.LookupEnv("CRYPTO_KEY"); ok {
+		cryptoKeyPath = v
+	}
 
 	if *databaseDSN != "" {
 		config.DatabaseDSN = *databaseDSN
@@ -91,9 +124,9 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 }
 
 func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
 		}
 	}
 	return defaultValue
@@ -144,7 +177,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hash
 // It returns immediately; goroutines keep running until Stop is called.
 func (a *Agent) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	a.cancel = cancel
 
 	a.startWorkerPool(ctx)
 
@@ -154,12 +187,17 @@ func (a *Agent) Run() {
 	go a.reportMetrics()
 
 	go a.processResults()
+
+	<-a.stopChan
 }
 
 // Stop signals all goroutines to exit and waits for them to finish.
 // Channels are closed after all workers have drained.
 func (a *Agent) Stop() {
 	close(a.stopChan)
+	if a.cancel != nil {
+		a.cancel()
+	}
 	a.wg.Wait()
 	close(a.jobChan)
 	close(a.resultChan)
@@ -219,7 +257,23 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
 
-	compressed, err := a.compressData(data)
+	payload := data
+	encrypted := false
+	if agentPubKey != nil {
+		encBody, enc, encErr := encrypt(data)
+		if encErr != nil {
+			return fmt.Errorf("encryption failed: %w", err)
+		}
+		payload = encBody
+		encrypted = enc
+	}
+
+	if a.hashKey != "" {
+		hash := intcrypto.HashSHA256(payload, a.hashKey)
+		_ = hash
+	}
+
+	compressed, err := a.compressData(payload)
 	if err != nil {
 		return fmt.Errorf("failed to compress data: %w", err)
 	}
@@ -230,9 +284,12 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	if encrypted {
+		req.Header.Set("X-Encrypted", "1")
+	}
+
 	if a.hashKey != "" {
-		hash := crypto.HashSHA256(data, a.hashKey)
-		req.Header.Set("HashSHA256", hash)
+		req.Header.Set("HashSHA256", intcrypto.HashSHA256(payload, a.hashKey))
 	}
 
 	resp, err := withRetryHTTP(a.client, req)
@@ -244,7 +301,6 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %s", resp.Status)
 	}
-
 	return nil
 }
 
@@ -408,12 +464,22 @@ func main() {
 
 	serverAddr, pollInterval, reportInterval, hashKey, rateLimit := parseFlags()
 
+	if cryptoKeyPath != "" {
+		k, err := intcrypto.ParseRSAPublicKeyPEM(cryptoKeyPath)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to load RSA public key")
+		}
+		agentPubKey = k
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer stop()
+
 	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey, rateLimit)
-	agent.Run()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
+	go agent.Run()
 
+	<-ctx.Done()
 	agent.Stop()
 }

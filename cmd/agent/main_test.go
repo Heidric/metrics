@@ -24,6 +24,11 @@ func runParseFlags(t *testing.T, args []string, env map[string]string) (addr str
 	return
 }
 
+func getenvOrEmpty(key string) string {
+	v, _ := os.LookupEnv(key)
+	return v
+}
+
 func TestParseFlags(t *testing.T) {
 	tests := []struct {
 		setup func()
@@ -107,11 +112,11 @@ func TestParseFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			oldArgs := os.Args
 			oldEnv := map[string]string{
-				"ADDRESS":         os.Getenv("ADDRESS"),
-				"POLL_INTERVAL":   os.Getenv("POLL_INTERVAL"),
-				"REPORT_INTERVAL": os.Getenv("REPORT_INTERVAL"),
-				"HASH_KEY":        os.Getenv("HASH_KEY"),
-				"RATE_LIMIT":      os.Getenv("RATE_LIMIT"),
+				"ADDRESS":         getenvOrEmpty("ADDRESS"),
+				"POLL_INTERVAL":   getenvOrEmpty("POLL_INTERVAL"),
+				"REPORT_INTERVAL": getenvOrEmpty("REPORT_INTERVAL"),
+				"HASH_KEY":        getenvOrEmpty("HASH_KEY"),
+				"RATE_LIMIT":      getenvOrEmpty("RATE_LIMIT"),
 			}
 			defer func() {
 				os.Args = oldArgs
@@ -171,7 +176,7 @@ func TestGetEnvInt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldValue := os.Getenv(tt.key)
+			oldValue := getenvOrEmpty(tt.key)
 			defer func() {
 				if oldValue == "" {
 					os.Unsetenv(tt.key)

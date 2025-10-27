@@ -3,11 +3,14 @@ package server
 import (
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
 	"github.com/Heidric/metrics.git/internal/server/middleware"
@@ -33,10 +36,17 @@ type Metrics interface {
 // Handlers expose read/update operations and a health endpoint. Construct via
 // NewServer and run the embedded *http.Server.
 type Server struct {
-	Srv     *http.Server
-	logger  *zerolog.Logger
-	metrics Metrics
-	hashKey string
+	Srv        *http.Server
+	logger     *zerolog.Logger
+	metrics    Metrics
+	hashKey    string
+	privateKey *rsa.PrivateKey
+}
+
+type Option func(*Server)
+
+func WithPrivateKey(k *rsa.PrivateKey) Option {
+	return func(s *Server) { s.privateKey = k }
 }
 
 type gzipResponseWriter struct {
@@ -49,12 +59,34 @@ func (g gzipResponseWriter) Write(b []byte) (int, error) {
 	return g.Writer.Write(b)
 }
 
+// DecryptJSONIfEncrypted conditionally decrypts JSON request bodies.
+// It decrypts only when a private key is configured and the X-Encrypted header equals "1".
+// On failure, responds with 400.
+func (s *Server) DecryptJSONIfEncrypted() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if s.privateKey == nil || r.Header.Get("X-Encrypted") != "1" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			mw := middleware.DecryptJSON(func(cipher []byte) ([]byte, error) {
+				var env intcrypto.Envelope
+				if err := json.Unmarshal(cipher, &env); err != nil {
+					return nil, err
+				}
+				return intcrypto.DecryptWith(s.privateKey, &env)
+			})
+			mw(next).ServeHTTP(w, r)
+		})
+	}
+}
+
 // NewServer configures the router and middleware and returns a ready-to-run
 // HTTP server for metrics. The returned Server embeds *http.Server.
 //   - addr: listen address (e.g. ":8080")
 //   - hashKey: key used by middleware that sign/verify payloads
 //   - metrics: storage implementation backing the handlers
-func NewServer(addr string, hashKey string, metrics Metrics) *Server {
+func NewServer(addr string, hashKey string, metrics Metrics, opts ...Option) *Server {
 	logger := zerolog.Nop()
 
 	r := chi.NewRouter()
@@ -64,6 +96,9 @@ func NewServer(addr string, hashKey string, metrics Metrics) *Server {
 		metrics: metrics,
 		logger:  &logger,
 	}
+	for _, o := range opts {
+		o(s)
+	}
 
 	r.Use(s.gzipMiddleware)
 	r.Use(s.loggingMiddleware)
@@ -72,9 +107,10 @@ func NewServer(addr string, hashKey string, metrics Metrics) *Server {
 		r.Get("/", s.listMetricsHandler)
 		r.Post("/update/{metricType}/{metricName}/{metricValue}", s.updateMetricHandler)
 		r.Get("/value/{metricType}/{metricName}", s.getMetricHandler)
-		r.Post("/update/", s.updateMetricJSONHandler)
-		r.With(middleware.HashMiddleware(hashKey)).Post("/value/", s.getMetricJSONHandler)
-		r.Post("/updates/", s.updateMetricsBatchHandler)
+		r.With(s.DecryptJSONIfEncrypted()).Post("/update/", s.updateMetricJSONHandler)
+		r.With(middleware.HashMiddleware(hashKey), s.DecryptJSONIfEncrypted()).
+			Post("/value/", s.getMetricJSONHandler)
+		r.With(s.DecryptJSONIfEncrypted()).Post("/updates/", s.updateMetricsBatchHandler)
 		r.Get("/ping", s.pingHandler)
 	})
 
