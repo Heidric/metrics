@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +29,7 @@ type Config struct {
 	flagDatabaseDSN     string // PostgreSQL DSN; when set, enables DB-backed storage
 	flagHashKey         string // HMAC key used by hash middleware and related logic
 	flagCryptoKey       string // path to RSA private key (PEM)
+	flagTrustedSubnet   string // trusted subnet in CIDR
 
 	cfg.Config
 
@@ -49,6 +52,7 @@ func loadConfig() (*Config, error) {
 	flag.StringVar(&config.flagDatabaseDSN, "d", "", "database DSN")
 	flag.StringVar(&config.flagHashKey, "k", "", "hash key")
 	flag.StringVar(&config.flagCryptoKey, "crypto-key", "", "path to RSA private key (PEM)")
+	flag.StringVar(&config.flagTrustedSubnet, "t", "", "trusted subnet in CIDR (e.g. 10.0.0.0/8)")
 	flag.String("config", "", "path to JSON config file")
 	flag.String("c", "", "path to JSON config file (shorthand)")
 
@@ -80,6 +84,9 @@ func loadConfig() (*Config, error) {
 	}
 	if config.flagCryptoKey != "" {
 		config.CryptoKeyPath = config.flagCryptoKey
+	}
+	if config.flagTrustedSubnet != "" {
+		config.TrustedSubnet = config.flagTrustedSubnet
 	}
 
 	return config, nil
@@ -131,7 +138,16 @@ func main() {
 	}
 
 	metrics := services.NewMetricsService(storage)
-	srv := server.NewServer(config.ServerAddress, config.HashKey, metrics, opts...)
+	var subnetOpt []server.Option
+	if ts := strings.TrimSpace(config.TrustedSubnet); ts != "" {
+		_, ipnet, err := net.ParseCIDR(ts)
+		if err != nil {
+			log.Fatalf("invalid TRUSTED_SUBNET/CIDR %q: %v", ts, err)
+		}
+		subnetOpt = append(subnetOpt, server.WithTrustedSubnet(ipnet))
+	}
+
+	srv := server.NewServer(config.ServerAddress, config.HashKey, metrics, append(opts, subnetOpt...)...)
 	srv.Run(ctx, runner)
 
 	<-ctx.Done()

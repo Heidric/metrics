@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -251,6 +252,30 @@ func (a *Agent) compressData(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// localIPForServer detects the local IP that would be used to reach the server.
+func (a *Agent) localIPForServer() string {
+	u, err := url.Parse(a.serverURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	host := u.Host
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		host = net.JoinHostPort(host, "80")
+	}
+	conn, err := net.Dial("udp", host)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if la, ok := conn.LocalAddr().(*net.UDPAddr); ok && la.IP != nil {
+		if ip4 := la.IP.To4(); ip4 != nil {
+			return ip4.String()
+		}
+		return la.IP.String()
+	}
+	return ""
+}
+
 func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	data, err := json.Marshal(metric)
 	if err != nil {
@@ -286,6 +311,9 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	req.Header.Set("Content-Encoding", "gzip")
 	if encrypted {
 		req.Header.Set("X-Encrypted", "1")
+	}
+	if ip := a.localIPForServer(); ip != "" {
+		req.Header.Set("X-Real-IP", ip)
 	}
 
 	if a.hashKey != "" {

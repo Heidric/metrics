@@ -23,6 +23,7 @@ type Config struct {
 	DatabaseDSN     string
 	HashKey         string
 	CryptoKeyPath   string
+	TrustedSubnet   string
 
 	PollInterval   time.Duration
 	ReportInterval time.Duration
@@ -43,6 +44,7 @@ type fileConfig struct {
 	DatabaseDSN    string         `json:"database_dsn"`
 	HashKey        string         `json:"hash_key"`
 	CryptoKey      string         `json:"crypto_key"`
+	TrustedSubnet  string         `json:"trusted_subnet"`
 }
 
 // pickConfigPathFromArgs performs a light pre-scan of os.Args
@@ -248,6 +250,12 @@ func NewConfig() (*Config, error) {
 		cryptoDefault = fc.CryptoKey
 	}
 	config.CryptoKeyPath = getEnv("CRYPTO_KEY", cryptoDefault)
+
+	trustedDefault := ""
+	if fc != nil && fc.TrustedSubnet != "" {
+		trustedDefault = fc.TrustedSubnet
+	}
+	config.TrustedSubnet = getEnv("TRUSTED_SUBNET", trustedDefault)
 
 	config.Logger.SetDefault()
 	return config, nil
