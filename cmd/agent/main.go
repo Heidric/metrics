@@ -216,7 +216,7 @@ func (a *Agent) initGRPC() error {
 			grpc.MaxCallSendMsgSize(a.grpcMaxSendMB*1024*1024),
 		),
 	}
-	conn, err := grpc.Dial(a.grpcAddr, opts...)
+	conn, err := grpc.NewClient(a.grpcAddr, opts...)
 	if err != nil {
 		return err
 	}
