@@ -20,7 +20,7 @@ func runParseFlags(t *testing.T, args []string, env map[string]string) (addr str
 	os.Args = append([]string{"agent"}, args...)
 	defer func() { flag.CommandLine = savedFS; os.Args = savedArgs }()
 
-	addr, poll, report, hash, rate = parseFlags()
+	addr, poll, report, hash, rate, _, _, _, _ = parseFlags()
 	return
 }
 
@@ -62,6 +62,7 @@ func TestParseFlags(t *testing.T) {
 			name: "env variables",
 			setup: func() {
 				os.Setenv("ADDRESS", "env:8081")
+				// Надёжнее указывать единицы времени
 				os.Setenv("POLL_INTERVAL", "3s")
 				os.Setenv("REPORT_INTERVAL", "15s")
 				os.Setenv("HASH_KEY", "hash-key")
@@ -132,7 +133,9 @@ func TestParseFlags(t *testing.T) {
 
 			tt.setup()
 			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-			address, poll, report, hashKey, rateLimit := parseFlags()
+
+			address, poll, report, hashKey, rateLimit, _, _, _, _ := parseFlags()
+
 			require.Equal(t, tt.wantAddress, address)
 			require.Equal(t, tt.wantPoll, poll)
 			require.Equal(t, tt.wantReport, report)
@@ -323,7 +326,7 @@ func Test_parseFlags_HashKey_FlagOverridesEnv(t *testing.T) {
 }
 
 func Test_parseFlags_PollAndReport_FromEnvWhenNoFlags(t *testing.T) {
-	addr, poll, report, _, _ := runParseFlags(t, []string{}, map[string]string{"POLL_INTERVAL": "3", "REPORT_INTERVAL": "17", "ADDRESS": "example:9090"})
+	addr, poll, report, _, _ := runParseFlags(t, []string{}, map[string]string{"POLL_INTERVAL": "3s", "REPORT_INTERVAL": "17s", "ADDRESS": "example:9090"})
 	if poll != 3*time.Second || report != 17*time.Second {
 		t.Fatalf("poll/report=%v/%v, want 3s/17s (ENV)", poll, report)
 	}
@@ -333,7 +336,7 @@ func Test_parseFlags_PollAndReport_FromEnvWhenNoFlags(t *testing.T) {
 }
 
 func Test_parseFlags_PollAndReport_FlagsOverrideEnv(t *testing.T) {
-	_, poll, report, _, _ := runParseFlags(t, []string{"-p", "9", "-r", "21"}, map[string]string{"POLL_INTERVAL": "3", "REPORT_INTERVAL": "17"})
+	_, poll, report, _, _ := runParseFlags(t, []string{"-p", "9", "-r", "21"}, map[string]string{"POLL_INTERVAL": "3s", "REPORT_INTERVAL": "17s"})
 	if poll != 9*time.Second || report != 21*time.Second {
 		t.Fatalf("poll/report=%v/%v, want 9s/21s (flags)", poll, report)
 	}

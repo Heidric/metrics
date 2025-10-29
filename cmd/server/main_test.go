@@ -42,7 +42,6 @@ func TestLoadConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			oldArgs := os.Args
 			oldFlags := flag.CommandLine
-
 			defer func() {
 				os.Args = oldArgs
 				flag.CommandLine = oldFlags
@@ -164,5 +163,84 @@ func TestLoadConfig_StoreInterval_EnvWhenNoFlag(t *testing.T) {
 	)
 	if cfg.StoreInterval != 42*time.Second {
 		t.Fatalf("StoreInterval=%v, want 42s (ENV)", cfg.StoreInterval)
+	}
+}
+
+func TestLoadConfig_GRPC_Defaults(t *testing.T) {
+	os.Clearenv()
+	cfg := runLoadConfigWithArgs(t, []string{}, nil)
+
+	if cfg.GRPCEnabled != false {
+		t.Fatalf("GRPCEnabled=%v, want false (default)", cfg.GRPCEnabled)
+	}
+	if cfg.GRPCAddress == "" {
+		t.Fatalf("GRPCAddress empty, want default like :9090")
+	}
+	if cfg.GRPCMaxRecvMB <= 0 || cfg.GRPCMaxSendMB <= 0 {
+		t.Fatalf("GRPCMaxRecv/Send must be >0, got %d/%d", cfg.GRPCMaxRecvMB, cfg.GRPCMaxSendMB)
+	}
+	// reflection default comes from cfg: usually true
+	if !cfg.GRPCReflection {
+		t.Fatalf("GRPCReflection=%v, want true (default)", cfg.GRPCReflection)
+	}
+}
+
+func TestLoadConfig_GRPC_EnableByFlagAndSizes(t *testing.T) {
+	cfg := runLoadConfigWithArgs(t,
+		[]string{"-grpc", "-grpc-addr", ":5051", "-grpc-max-recv", "16", "-grpc-max-send", "32", "-grpc-reflection=false"},
+		map[string]string{
+			"GRPC_ENABLED":     "false",
+			"GRPC_ADDRESS":     ":9090",
+			"GRPC_MAX_RECV_MB": "8",
+			"GRPC_MAX_SEND_MB": "8",
+			"GRPC_REFLECTION":  "true",
+		},
+	)
+	if cfg.GRPCEnabled != true {
+		t.Fatalf("GRPCEnabled=%v, want true (flag)", cfg.GRPCEnabled)
+	}
+	if cfg.GRPCAddress != ":5051" {
+		t.Fatalf("GRPCAddress=%q, want %q (flag)", cfg.GRPCAddress, ":5051")
+	}
+	if cfg.GRPCMaxRecvMB != 16 || cfg.GRPCMaxSendMB != 32 {
+		t.Fatalf("sizes=%d/%d, want 16/32 (flags)", cfg.GRPCMaxRecvMB, cfg.GRPCMaxSendMB)
+	}
+	if cfg.GRPCReflection != false {
+		t.Fatalf("GRPCReflection=%v, want false (flag)", cfg.GRPCReflection)
+	}
+}
+
+func TestLoadConfig_GRPC_EnvOnly_NoFlags(t *testing.T) {
+	cfg := runLoadConfigWithArgs(t,
+		[]string{},
+		map[string]string{
+			"GRPC_ENABLED":     "true",
+			"GRPC_ADDRESS":     "0.0.0.0:9090",
+			"GRPC_MAX_RECV_MB": "64",
+			"GRPC_MAX_SEND_MB": "64",
+			"GRPC_REFLECTION":  "false",
+		},
+	)
+	if cfg.GRPCEnabled != true {
+		t.Fatalf("GRPCEnabled=%v, want true (env)", cfg.GRPCEnabled)
+	}
+	if cfg.GRPCAddress != "0.0.0.0:9090" {
+		t.Fatalf("GRPCAddress=%q, want %q (env)", cfg.GRPCAddress, "0.0.0.0:9090")
+	}
+	if cfg.GRPCMaxRecvMB != 64 || cfg.GRPCMaxSendMB != 64 {
+		t.Fatalf("sizes=%d/%d, want 64/64 (env)", cfg.GRPCMaxRecvMB, cfg.GRPCMaxSendMB)
+	}
+	if cfg.GRPCReflection != false {
+		t.Fatalf("GRPCReflection=%v, want false (env)", cfg.GRPCReflection)
+	}
+}
+
+func TestLoadConfig_TrustedSubnet_FlagOverridesEnv(t *testing.T) {
+	cfg := runLoadConfigWithArgs(t,
+		[]string{"-t", "192.168.1.0/24"},
+		map[string]string{"TRUSTED_SUBNET": "10.0.0.0/8"},
+	)
+	if cfg.TrustedSubnet != "192.168.1.0/24" {
+		t.Fatalf("TrustedSubnet=%q, want %q (flag override)", cfg.TrustedSubnet, "192.168.1.0/24")
 	}
 }

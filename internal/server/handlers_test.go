@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -235,4 +236,48 @@ func TestHandlers(t *testing.T) {
 			t.Errorf("expected 200 with valid hash, got %d", w.Code)
 		}
 	})
+}
+
+func TestTrustedSubnet_AllowsAndDenies(t *testing.T) {
+	l := zerolog.New(nil).Level(zerolog.Disabled)
+	logger.Log = &l
+
+	mm := &mockMetrics{
+		updateMetricJSONFn: func(metric *model.Metrics) error { return nil },
+	}
+
+	_, net192, _ := net.ParseCIDR("192.168.1.0/24")
+
+	srv := NewServer(":8080", "", mm, WithTrustedSubnet(net192))
+	router := srv.Srv.Handler.(*chi.Mux)
+
+	metric := &model.Metrics{ID: "Alloc", MType: model.GaugeType, Value: ptrFloat64(1.23)}
+	body, _ := json.Marshal(metric)
+
+	makeReq := func(ip string) *httptest.ResponseRecorder {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		_, _ = gz.Write(body)
+		_ = gz.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/update/", &buf)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		if ip != "" {
+			req.Header.Set("X-Real-IP", ip)
+		}
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	if rr := makeReq("192.168.1.10"); rr.Code != http.StatusOK {
+		t.Fatalf("allowed ip -> status %d, want %d", rr.Code, http.StatusOK)
+	}
+	if rr := makeReq("10.0.0.1"); rr.Code != http.StatusForbidden {
+		t.Fatalf("denied ip -> status %d, want %d", rr.Code, http.StatusForbidden)
+	}
+	if rr := makeReq(""); rr.Code != http.StatusForbidden {
+		t.Fatalf("missing header -> status %d, want %d", rr.Code, http.StatusForbidden)
+	}
 }

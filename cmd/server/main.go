@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -12,10 +14,14 @@ import (
 	"github.com/Heidric/metrics.git/internal/cfg"
 	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/db"
+	"github.com/Heidric/metrics.git/internal/grpcsvc"
 	"github.com/Heidric/metrics.git/internal/logger"
+	intpb "github.com/Heidric/metrics.git/internal/pb"
 	"github.com/Heidric/metrics.git/internal/server"
 	"github.com/Heidric/metrics.git/internal/services"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 // Config aggregates runtime configuration for the server command.
@@ -27,6 +33,13 @@ type Config struct {
 	flagDatabaseDSN     string // PostgreSQL DSN; when set, enables DB-backed storage
 	flagHashKey         string // HMAC key used by hash middleware and related logic
 	flagCryptoKey       string // path to RSA private key (PEM)
+	flagTrustedSubnet   string // trusted subnet in CIDR
+
+	flagGRPCEnabled    bool   // --grpc
+	flagGRPCAddress    string // --grpc-addr
+	flagGRPCMaxRecvMB  int    // --grpc-max-recv
+	flagGRPCMaxSendMB  int    // --grpc-max-send
+	flagGRPCReflection bool   // --grpc-reflection
 
 	cfg.Config
 
@@ -49,10 +62,21 @@ func loadConfig() (*Config, error) {
 	flag.StringVar(&config.flagDatabaseDSN, "d", "", "database DSN")
 	flag.StringVar(&config.flagHashKey, "k", "", "hash key")
 	flag.StringVar(&config.flagCryptoKey, "crypto-key", "", "path to RSA private key (PEM)")
+	flag.StringVar(&config.flagTrustedSubnet, "t", "", "trusted subnet in CIDR (e.g. 10.0.0.0/8)")
+	flag.BoolVar(&config.flagGRPCEnabled, "grpc", false, "enable gRPC server")
+	flag.StringVar(&config.flagGRPCAddress, "grpc-addr", "", "gRPC listen address")
+	flag.IntVar(&config.flagGRPCMaxRecvMB, "grpc-max-recv", 0, "gRPC max recv MB")
+	flag.IntVar(&config.flagGRPCMaxSendMB, "grpc-max-send", 0, "gRPC max send MB")
+	flag.BoolVar(&config.flagGRPCReflection, "grpc-reflection", true, "enable gRPC reflection")
 	flag.String("config", "", "path to JSON config file")
 	flag.String("c", "", "path to JSON config file (shorthand)")
 
 	flag.Parse()
+
+	visited := map[string]bool{}
+	flag.CommandLine.Visit(func(f *flag.Flag) {
+		visited[f.Name] = true
+	})
 
 	if config.flagAddress != "" {
 		config.ServerAddress = config.flagAddress
@@ -63,13 +87,7 @@ func loadConfig() (*Config, error) {
 	if config.flagStoreInterval != 0 {
 		config.StoreInterval = config.flagStoreInterval
 	}
-	var restoreSet bool
-	flag.CommandLine.Visit(func(f *flag.Flag) {
-		if f.Name == "r" {
-			restoreSet = true
-		}
-	})
-	if restoreSet {
+	if visited["r"] {
 		config.Restore = config.flagRestore
 	}
 	if config.flagDatabaseDSN != "" {
@@ -80,6 +98,25 @@ func loadConfig() (*Config, error) {
 	}
 	if config.flagCryptoKey != "" {
 		config.CryptoKeyPath = config.flagCryptoKey
+	}
+	if config.flagTrustedSubnet != "" {
+		config.TrustedSubnet = config.flagTrustedSubnet
+	}
+
+	if visited["grpc"] {
+		config.GRPCEnabled = config.flagGRPCEnabled
+	}
+	if config.flagGRPCAddress != "" {
+		config.GRPCAddress = config.flagGRPCAddress
+	}
+	if config.flagGRPCMaxRecvMB > 0 {
+		config.GRPCMaxRecvMB = config.flagGRPCMaxRecvMB
+	}
+	if config.flagGRPCMaxSendMB > 0 {
+		config.GRPCMaxSendMB = config.flagGRPCMaxSendMB
+	}
+	if visited["grpc-reflection"] {
+		config.GRPCReflection = config.flagGRPCReflection
 	}
 
 	return config, nil
@@ -131,8 +168,46 @@ func main() {
 	}
 
 	metrics := services.NewMetricsService(storage)
-	srv := server.NewServer(config.ServerAddress, config.HashKey, metrics, opts...)
+	var subnetOpt []server.Option
+	if ts := strings.TrimSpace(config.TrustedSubnet); ts != "" {
+		_, ipnet, err := net.ParseCIDR(ts)
+		if err != nil {
+			log.Fatalf("invalid TRUSTED_SUBNET/CIDR %q: %v", ts, err)
+		}
+		subnetOpt = append(subnetOpt, server.WithTrustedSubnet(ipnet))
+	}
+
+	srv := server.NewServer(config.ServerAddress, config.HashKey, metrics, append(opts, subnetOpt...)...)
 	srv.Run(ctx, runner)
+
+	var grpcSrv *grpc.Server
+	var grpcLn net.Listener
+	if config.GRPCEnabled {
+		var trustedNet *net.IPNet
+		if ts := strings.TrimSpace(config.TrustedSubnet); ts != "" {
+			_, ipnet, err := net.ParseCIDR(ts)
+			if err != nil {
+				log.Fatalf("invalid TRUSTED_SUBNET for gRPC: %v", err)
+			}
+			trustedNet = ipnet
+		}
+		grpcSrv = grpcsvc.BuildServer(trustedNet, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)
+		svc := grpcsvc.New(metrics, trustedNet)
+		intpb.RegisterMetricsServiceServer(grpcSrv, svc)
+		if config.GRPCReflection {
+			reflection.Register(grpcSrv)
+		}
+		ln, err := net.Listen("tcp", config.GRPCAddress)
+		if err != nil {
+			log.Fatalf("gRPC listen: %v", err)
+		}
+		grpcLn = ln
+		go func() {
+			if err := grpcSrv.Serve(ln); err != nil {
+				log.Printf("gRPC serve error: %v", err)
+			}
+		}()
+	}
 
 	<-ctx.Done()
 
@@ -140,6 +215,11 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Zerolog().Error().Err(err).Msg("server shutdown error")
+	}
+
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
+		_ = grpcLn.Close()
 	}
 
 	if closer, ok := storage.(interface{ Close() error }); ok {

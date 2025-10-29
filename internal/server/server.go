@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -41,12 +42,18 @@ type Server struct {
 	metrics    Metrics
 	hashKey    string
 	privateKey *rsa.PrivateKey
+	trustedNet *net.IPNet
 }
 
 type Option func(*Server)
 
 func WithPrivateKey(k *rsa.PrivateKey) Option {
 	return func(s *Server) { s.privateKey = k }
+}
+
+// WithTrustedSubnet sets trusted subnet to allow posting metrics only from IPs inside CIDR.
+func WithTrustedSubnet(n *net.IPNet) Option {
+	return func(s *Server) { s.trustedNet = n }
 }
 
 type gzipResponseWriter struct {
@@ -81,6 +88,36 @@ func (s *Server) DecryptJSONIfEncrypted() func(http.Handler) http.Handler {
 	}
 }
 
+// trustedSubnetMiddleware denies metric write requests from non-trusted IPs when a CIDR is configured.
+func (s *Server) trustedSubnetMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.trustedNet == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ipStr := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+		if ipStr == "" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		if s.trustedNet.IP.To4() != nil {
+			if ip4 := ip.To4(); ip4 != nil {
+				ip = ip4
+			}
+		}
+		if !s.trustedNet.Contains(ip) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // NewServer configures the router and middleware and returns a ready-to-run
 // HTTP server for metrics. The returned Server embeds *http.Server.
 //   - addr: listen address (e.g. ":8080")
@@ -105,12 +142,12 @@ func NewServer(addr string, hashKey string, metrics Metrics, opts ...Option) *Se
 
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", s.listMetricsHandler)
-		r.Post("/update/{metricType}/{metricName}/{metricValue}", s.updateMetricHandler)
+		r.With(s.trustedSubnetMiddleware).Post("/update/{metricType}/{metricName}/{metricValue}", s.updateMetricHandler)
 		r.Get("/value/{metricType}/{metricName}", s.getMetricHandler)
-		r.With(s.DecryptJSONIfEncrypted()).Post("/update/", s.updateMetricJSONHandler)
+		r.With(s.trustedSubnetMiddleware, s.DecryptJSONIfEncrypted()).Post("/update/", s.updateMetricJSONHandler)
 		r.With(middleware.HashMiddleware(hashKey), s.DecryptJSONIfEncrypted()).
 			Post("/value/", s.getMetricJSONHandler)
-		r.With(s.DecryptJSONIfEncrypted()).Post("/updates/", s.updateMetricsBatchHandler)
+		r.With(s.trustedSubnetMiddleware, s.DecryptJSONIfEncrypted()).Post("/updates/", s.updateMetricsBatchHandler)
 		r.Get("/ping", s.pingHandler)
 	})
 
