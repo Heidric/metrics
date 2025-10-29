@@ -27,9 +27,16 @@ import (
 	intcrypto "github.com/Heidric/metrics.git/internal/crypto"
 	"github.com/Heidric/metrics.git/internal/logger"
 	"github.com/Heidric/metrics.git/internal/model"
+
 	"github.com/rs/zerolog"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	// gRPC
+	"github.com/Heidric/metrics.git/internal/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -59,7 +66,17 @@ type Agent struct {
 	serverURL string
 	hashKey   string
 
-	client         *http.Client
+	// HTTP
+	client *http.Client
+
+	// gRPC
+	useGRPC       bool
+	grpcAddr      string
+	grpcConn      *grpc.ClientConn
+	grpcCli       pb.MetricsServiceClient
+	grpcMaxRecvMB int
+	grpcMaxSendMB int
+
 	jobChan        chan MetricJob // inbound jobs for the worker pool
 	resultChan     chan error     // reporting results (nil on success)
 	stopChan       chan struct{}  // signals all goroutines to stop
@@ -92,7 +109,7 @@ func encrypt(body []byte) (out []byte, encrypted bool, err error) {
 	return b, true, nil
 }
 
-func parseFlags() (string, time.Duration, time.Duration, string, int) {
+func parseFlags() (serverAddr string, pollInterval time.Duration, reportInterval time.Duration, hashKey string, rateLimit int, grpcEnabled bool, grpcAddr string, grpcMaxRecvMB int, grpcMaxSendMB int) {
 	config, err := cfg.NewConfig()
 	if err != nil {
 		log.Fatalf("Error loading config: %v\n", err)
@@ -100,13 +117,18 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 
 	flag.String("config", "", "path to JSON config file")
 	flag.String("c", "", "path to JSON config file (shorthand)")
-	serverAddr := flag.String("a", config.ServerAddress, "HTTP server endpoint address")
-	pollInterval := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
-	reportInterval := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
+	serverAddrPtr := flag.String("a", config.ServerAddress, "HTTP server endpoint address (host:port or scheme://host:port)")
+	pollIntervalPtr := flag.Int("p", int(config.PollInterval.Seconds()), "Poll interval in seconds")
+	reportIntervalPtr := flag.Int("r", int(config.ReportInterval.Seconds()), "Report interval in seconds")
 	databaseDSN := flag.String("d", config.DatabaseDSN, "Database DSN")
-	hashKey := flag.String("k", config.HashKey, "Hash key")
-	rateLimit := flag.Int("l", getEnvInt("RATE_LIMIT", 10), "Rate limit for concurrent requests")
+	hashKeyPtr := flag.String("k", config.HashKey, "Hash key")
+	rateLimitPtr := flag.Int("l", getEnvInt("RATE_LIMIT", 10), "Rate limit for concurrent requests")
 	flag.StringVar(&flagCryptoKey, "crypto-key", "", "path to RSA public key (PEM)")
+
+	grpcEnabledPtr := flag.Bool("grpc", config.GRPCEnabled, "Enable gRPC client")
+	grpcAddrPtr := flag.String("grpc-addr", config.GRPCAddress, "gRPC server address (host:port)")
+	grpcMaxRecvPtr := flag.Int("grpc-max-recv", config.GRPCMaxRecvMB, "gRPC max recv size in MB")
+	grpcMaxSendPtr := flag.Int("grpc-max-send", config.GRPCMaxSendMB, "gRPC max send size in MB")
 
 	flag.Parse()
 
@@ -121,7 +143,15 @@ func parseFlags() (string, time.Duration, time.Duration, string, int) {
 		config.DatabaseDSN = *databaseDSN
 	}
 
-	return *serverAddr, time.Duration(*pollInterval) * time.Second, time.Duration(*reportInterval) * time.Second, *hashKey, *rateLimit
+	return *serverAddrPtr,
+		time.Duration(*pollIntervalPtr) * time.Second,
+		time.Duration(*reportIntervalPtr) * time.Second,
+		*hashKeyPtr,
+		*rateLimitPtr,
+		*grpcEnabledPtr,
+		*grpcAddrPtr,
+		*grpcMaxRecvPtr,
+		*grpcMaxSendPtr
 }
 
 func getEnvInt(key string, defaultValue int) int {
@@ -174,11 +204,39 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, hash
 	}
 }
 
+// initGRPC dials the gRPC server if enabled.
+func (a *Agent) initGRPC() error {
+	if !a.useGRPC || a.grpcAddr == "" {
+		return nil
+	}
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(a.grpcMaxRecvMB*1024*1024),
+			grpc.MaxCallSendMsgSize(a.grpcMaxSendMB*1024*1024),
+		),
+	}
+	conn, err := grpc.Dial(a.grpcAddr, opts...)
+	if err != nil {
+		return err
+	}
+	a.grpcConn = conn
+	a.grpcCli = pb.NewMetricsServiceClient(conn)
+	return nil
+}
+
 // Run starts the agent’s worker pool, collectors, and reporting loops.
 // It returns immediately; goroutines keep running until Stop is called.
 func (a *Agent) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
+
+	if a.useGRPC {
+		if err := a.initGRPC(); err != nil {
+			logger.Log.Error().Msgf("gRPC disabled: dial failed: %v", err)
+			a.useGRPC = false
+		}
+	}
 
 	a.startWorkerPool(ctx)
 
@@ -202,6 +260,9 @@ func (a *Agent) Stop() {
 	a.wg.Wait()
 	close(a.jobChan)
 	close(a.resultChan)
+	if a.grpcConn != nil {
+		_ = a.grpcConn.Close()
+	}
 }
 
 func (a *Agent) startWorkerPool(ctx context.Context) {
@@ -252,7 +313,7 @@ func (a *Agent) compressData(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// localIPForServer detects the local IP that would be used to reach the server.
+// localIPForServer detects the local IP that would be used to reach the HTTP server.
 func (a *Agent) localIPForServer() string {
 	u, err := url.Parse(a.serverURL)
 	if err != nil || u.Host == "" {
@@ -262,7 +323,12 @@ func (a *Agent) localIPForServer() string {
 	if _, _, err := net.SplitHostPort(host); err != nil {
 		host = net.JoinHostPort(host, "80")
 	}
-	conn, err := net.Dial("udp", host)
+	return localIPForHostPort(host)
+}
+
+// localIPForHostPort detects local IP for reaching a host:port over UDP.
+func localIPForHostPort(hostport string) string {
+	conn, err := net.Dial("udp", hostport)
 	if err != nil {
 		return ""
 	}
@@ -276,7 +342,22 @@ func (a *Agent) localIPForServer() string {
 	return ""
 }
 
+// localIPBest tries HTTP server target first, then gRPC address.
+func (a *Agent) localIPBest() string {
+	if ip := a.localIPForServer(); ip != "" {
+		return ip
+	}
+	if a.grpcAddr != "" {
+		return localIPForHostPort(a.grpcAddr)
+	}
+	return ""
+}
+
 func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
+	if a.useGRPC {
+		return a.sendMetricGRPC(ctx, metric)
+	}
+
 	data, err := json.Marshal(metric)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metric: %w", err)
@@ -287,15 +368,14 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	if agentPubKey != nil {
 		encBody, enc, encErr := encrypt(data)
 		if encErr != nil {
-			return fmt.Errorf("encryption failed: %w", err)
+			return fmt.Errorf("encryption failed: %w", encErr)
 		}
 		payload = encBody
 		encrypted = enc
 	}
 
 	if a.hashKey != "" {
-		hash := intcrypto.HashSHA256(payload, a.hashKey)
-		_ = hash
+		_ = intcrypto.HashSHA256(payload, a.hashKey)
 	}
 
 	compressed, err := a.compressData(payload)
@@ -312,7 +392,7 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 	if encrypted {
 		req.Header.Set("X-Encrypted", "1")
 	}
-	if ip := a.localIPForServer(); ip != "" {
+	if ip := a.localIPBest(); ip != "" {
 		req.Header.Set("X-Real-IP", ip)
 	}
 
@@ -330,6 +410,28 @@ func (a *Agent) sendMetric(ctx context.Context, metric *model.Metrics) error {
 		return fmt.Errorf("unexpected status: %s", resp.Status)
 	}
 	return nil
+}
+
+// sendMetricGRPC sends a metric via gRPC using the pb API.
+func (a *Agent) sendMetricGRPC(ctx context.Context, metric *model.Metrics) error {
+	if a.grpcCli == nil {
+		return errors.New("grpc not initialized")
+	}
+	pm := &pb.Metric{Id: metric.ID, Type: metric.MType}
+	if metric.MType == model.GaugeType && metric.Value != nil {
+		pm.Value = *metric.Value
+	}
+	if metric.MType == model.CounterType && metric.Delta != nil {
+		pm.Delta = *metric.Delta
+	}
+	ip := a.localIPBest()
+	md := metadata.MD{}
+	if ip != "" {
+		md.Set("x-real-ip", ip)
+	}
+	ctx = metadata.NewOutgoingContext(ctx, md)
+	_, err := a.grpcCli.Update(ctx, &pb.UpdateRequest{Metric: pm})
+	return err
 }
 
 func (a *Agent) pollRuntimeMetrics() {
@@ -490,7 +592,8 @@ func main() {
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	logger.Log = &log
 
-	serverAddr, pollInterval, reportInterval, hashKey, rateLimit := parseFlags()
+	serverAddr, pollInterval, reportInterval, hashKey, rateLimit, grpcEnabled, grpcAddr, grpcMaxRecv, grpcMaxSend :=
+		parseFlags()
 
 	if cryptoKeyPath != "" {
 		k, err := intcrypto.ParseRSAPublicKeyPEM(cryptoKeyPath)
@@ -505,6 +608,19 @@ func main() {
 	defer stop()
 
 	agent := NewAgent(serverAddr, pollInterval, reportInterval, hashKey, rateLimit)
+	agent.useGRPC = grpcEnabled
+	agent.grpcAddr = grpcAddr
+	if agent.grpcAddr == "" {
+		agent.grpcAddr = "localhost:9090"
+	}
+	if grpcMaxRecv <= 0 {
+		grpcMaxRecv = 8
+	}
+	if grpcMaxSend <= 0 {
+		grpcMaxSend = 8
+	}
+	agent.grpcMaxRecvMB = grpcMaxRecv
+	agent.grpcMaxSendMB = grpcMaxSend
 
 	go agent.Run()
 

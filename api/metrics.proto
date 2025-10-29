@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package metrics;
+option go_package = "github.com/Heidric/metrics.git/internal/pb;pb";
+
+import "google/protobuf/empty.proto";
+
+message Metric {
+  string id   = 1;
+  string type = 2;
+  double value = 3;
+  int64  delta = 4;
+}
+
+message UpdateRequest { Metric metric = 1; }
+message UpdateResponse { bool ok = 1; }
+
+message UpdateBatchRequest { repeated Metric metrics = 1; }
+message UpdateBatchResponse { bool ok = 1; }
+
+message GetValueRequest { string id = 1; string type = 2; }
+message GetValueResponse { Metric metric = 1; bool found = 2; }
+
+service MetricsService {
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Updates(UpdateBatchRequest) returns (UpdateBatchResponse);
+  rpc Value(GetValueRequest) returns (GetValueResponse);
+}

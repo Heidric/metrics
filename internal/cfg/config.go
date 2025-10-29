@@ -25,6 +25,12 @@ type Config struct {
 	CryptoKeyPath   string
 	TrustedSubnet   string
 
+	GRPCEnabled    bool
+	GRPCAddress    string
+	GRPCMaxRecvMB  int
+	GRPCMaxSendMB  int
+	GRPCReflection bool
+
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 	StoreInterval  time.Duration
@@ -45,6 +51,12 @@ type fileConfig struct {
 	HashKey        string         `json:"hash_key"`
 	CryptoKey      string         `json:"crypto_key"`
 	TrustedSubnet  string         `json:"trusted_subnet"`
+
+	GRPCEnabled    *bool  `json:"grpc_enabled,omitempty"`
+	GRPCAddress    string `json:"grpc_address"`
+	GRPCMaxRecvMB  *int   `json:"grpc_max_recv_mb,omitempty"`
+	GRPCMaxSendMB  *int   `json:"grpc_max_send_mb,omitempty"`
+	GRPCReflection *bool  `json:"grpc_reflection,omitempty"`
 }
 
 // pickConfigPathFromArgs performs a light pre-scan of os.Args
@@ -174,6 +186,15 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+func getEnvInt(key string, defaultValue int) int {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return defaultValue
+}
+
 func NewConfig() (*Config, error) {
 	godotenv.Load()
 
@@ -256,6 +277,35 @@ func NewConfig() (*Config, error) {
 		trustedDefault = fc.TrustedSubnet
 	}
 	config.TrustedSubnet = getEnv("TRUSTED_SUBNET", trustedDefault)
+
+	grpcEnabledDefault := false
+	if fc != nil && fc.GRPCEnabled != nil {
+		grpcEnabledDefault = *fc.GRPCEnabled
+	}
+	config.GRPCEnabled = parseBool("GRPC_ENABLED", grpcEnabledDefault)
+
+	grpcAddrDefault := ":9090"
+	if fc != nil && fc.GRPCAddress != "" {
+		grpcAddrDefault = fc.GRPCAddress
+	}
+	config.GRPCAddress = getEnv("GRPC_ADDRESS", grpcAddrDefault)
+
+	recvDefault := 8
+	if fc != nil && fc.GRPCMaxRecvMB != nil {
+		recvDefault = *fc.GRPCMaxRecvMB
+	}
+	sendDefault := 8
+	if fc != nil && fc.GRPCMaxSendMB != nil {
+		sendDefault = *fc.GRPCMaxSendMB
+	}
+	config.GRPCMaxRecvMB = getEnvInt("GRPC_MAX_RECV_MB", recvDefault)
+	config.GRPCMaxSendMB = getEnvInt("GRPC_MAX_SEND_MB", sendDefault)
+
+	reflDefault := true
+	if fc != nil && fc.GRPCReflection != nil {
+		reflDefault = *fc.GRPCReflection
+	}
+	config.GRPCReflection = parseBool("GRPC_REFLECTION", reflDefault)
 
 	config.Logger.SetDefault()
 	return config, nil
